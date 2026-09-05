@@ -14,6 +14,8 @@ type Member = {
   ip_address: string | null;
   game_name: string | null;
   status: string | null;
+  wallet_total: number;
+  last_wallet_activity: string | null;
 };
 
 type Wallet = {
@@ -27,6 +29,7 @@ export default function MembersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("newest");
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
@@ -82,7 +85,60 @@ export default function MembersPage() {
         throw new Error(membersError.message);
       }
 
-      setMembers((data || []) as Member[]);
+      const memberRows = (data || []) as Omit<
+        Member,
+        "wallet_total" | "last_wallet_activity"
+      >[];
+
+      const memberIds = memberRows.map((member) => member.id);
+
+      const walletMap: Record<string, number> = {};
+      const activityMap: Record<string, string | null> = {};
+
+      if (memberIds.length > 0) {
+        const { data: wallets, error: walletError } = await supabase
+          .from("wallet_balances")
+          .select(
+            "user_id, deposit_balance, bonus_balance, winning_balance"
+          )
+          .in("user_id", memberIds);
+
+        if (walletError) {
+          console.error("Wallet list error:", walletError);
+        }
+
+        (wallets || []).forEach((wallet: any) => {
+          walletMap[wallet.user_id] =
+            Number(wallet.deposit_balance || 0) +
+            Number(wallet.bonus_balance || 0) +
+            Number(wallet.winning_balance || 0);
+        });
+
+        const { data: transactions, error: transactionError } =
+          await supabase
+            .from("wallet_transactions")
+            .select("user_id, created_at")
+            .in("user_id", memberIds)
+            .order("created_at", { ascending: false });
+
+        if (transactionError) {
+          console.error("Wallet activity error:", transactionError);
+        }
+
+        (transactions || []).forEach((tx: any) => {
+          if (!activityMap[tx.user_id]) {
+            activityMap[tx.user_id] = tx.created_at;
+          }
+        });
+      }
+
+      setMembers(
+        memberRows.map((member) => ({
+          ...member,
+          wallet_total: walletMap[member.id] || 0,
+          last_wallet_activity: activityMap[member.id] || null,
+        }))
+      );
     } catch (err: any) {
       console.error(err);
       setError(err?.message || "Unable to load members.");
@@ -124,10 +180,10 @@ export default function MembersPage() {
   const filteredMembers = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    if (!q) return members;
+    let result = members.filter((member) => {
+      if (!q) return true;
 
-    return members.filter((member) => {
-      const values = [
+      return [
         member.id,
         member.full_name,
         member.phone,
@@ -137,15 +193,64 @@ export default function MembersPage() {
         member.role,
         member.status,
         member.ip_address,
-      ];
-
-      return values.some((value) =>
-        String(value || "")
-          .toLowerCase()
-          .includes(q)
+      ].some((value) =>
+        String(value || "").toLowerCase().includes(q)
       );
     });
-  }, [members, search]);
+
+    const sevenDaysAgo =
+      Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+    if (filter === "active") {
+      result = result.filter(
+        (member) =>
+          !!member.last_wallet_activity &&
+          new Date(member.last_wallet_activity).getTime() >=
+            sevenDaysAgo
+      );
+    }
+
+    if (filter === "inactive") {
+      result = result.filter(
+        (member) =>
+          !member.last_wallet_activity ||
+          new Date(member.last_wallet_activity).getTime() <
+            sevenDaysAgo
+      );
+    }
+
+    if (filter === "restricted") {
+      result = result.filter(
+        (member) =>
+          String(member.status || "").toLowerCase() ===
+          "restricted"
+      );
+    }
+
+    result.sort((a, b) => {
+      if (filter === "oldest") {
+        return (
+          new Date(a.created_at || 0).getTime() -
+          new Date(b.created_at || 0).getTime()
+        );
+      }
+
+      if (filter === "wallet-low") {
+        return a.wallet_total - b.wallet_total;
+      }
+
+      if (filter === "wallet-high") {
+        return b.wallet_total - a.wallet_total;
+      }
+
+      return (
+        new Date(b.created_at || 0).getTime() -
+        new Date(a.created_at || 0).getTime()
+      );
+    });
+
+    return result;
+  }, [members, search, filter]);
 
   function formatDate(date: string | null) {
     if (!date) return "-";
@@ -326,6 +431,47 @@ export default function MembersPage() {
         .ip {
           color: #8997aa;
           font-family: monospace;
+        }
+
+        .filter-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+
+        .filter-label {
+          color: #68778c;
+          font-size: 8px;
+          font-weight: 900;
+          letter-spacing: 1px;
+        }
+
+        .filter-select {
+          height: 38px;
+          min-width: 330px;
+          padding: 0 12px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0d1520;
+          color: #e9eef7;
+          font-size: 10px;
+          font-weight: 700;
+          outline: none;
+        }
+
+        .filter-select:focus {
+          border-color: #ef1638;
+        }
+
+        .wallet-total {
+          color: #fff;
+          font-weight: 900;
+        }
+
+        .activity {
+          color: #8f9caf;
+          font-size: 9px;
         }
 
         .role {
@@ -515,6 +661,16 @@ export default function MembersPage() {
             justify-content: space-between;
           }
 
+          .filter-row {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .filter-select {
+            width: 100%;
+            min-width: 0;
+          }
+
           .info-grid {
             grid-template-columns: 1fr;
           }
@@ -558,6 +714,27 @@ export default function MembersPage() {
         />
       </div>
 
+      <div className="filter-row">
+        <label className="filter-label">FILTER</label>
+        <select
+          className="filter-select"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        >
+          <option value="newest">Newest → Oldest</option>
+          <option value="oldest">Oldest → Newest</option>
+          <option value="wallet-low">Wallet Low → High</option>
+          <option value="wallet-high">Wallet High → Low</option>
+          <option value="active">
+            Active Members · Wallet Activity in Last 7 Days
+          </option>
+          <option value="inactive">
+            Inactive Members · No Wallet Activity in 7 Days
+          </option>
+          <option value="restricted">Restricted Members</option>
+        </select>
+      </div>
+
       {loading ? (
         <div className="table-wrap">
           <div className="loading">Loading members...</div>
@@ -583,6 +760,8 @@ export default function MembersPage() {
                 <th>Role</th>
                 <th>Joined</th>
                 <th>IP Address</th>
+                <th>Total Wallet</th>
+                <th>Last Wallet Activity</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -646,6 +825,20 @@ export default function MembersPage() {
                   <td>
                     <span className="ip">
                       {member.ip_address || "Not recorded"}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span className="wallet-total">
+                      {money(member.wallet_total)}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span className="activity">
+                      {member.last_wallet_activity
+                        ? formatDate(member.last_wallet_activity)
+                        : "No activity"}
                     </span>
                   </td>
 
