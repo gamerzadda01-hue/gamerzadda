@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function SignupPage() {
+function SignupPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -864,6 +864,15 @@ export default function SignupPage() {
         )}
       </div>
     </main>
+  );
+}
+
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: "100vh", background: "#050507" }} />}>
+      <SignupPageContent />
+    </Suspense>
   );
 }
 
