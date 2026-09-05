@@ -8,45 +8,131 @@ export async function POST(request: Request) {
   try {
     console.log("WEBHOOK STEP 1: START");
 
-    const formData = await request.formData();
+    // ==========================================
+    // READ WEBHOOK BODY SAFELY
+    // ==========================================
 
-    console.log("WEBHOOK STEP 2: FORMDATA READ");
+    const contentType =
+      request.headers.get("content-type") || "";
 
-    const orderId = String(
-      formData.get("order_id") || ""
-    ).trim();
+    console.log(
+      "WEBHOOK CONTENT TYPE:",
+      contentType
+    );
 
-    console.log("WEBHOOK STEP 3: ORDER ID:", orderId);
+    const rawBody = await request.text();
+
+    console.log(
+      "WEBHOOK STEP 2: BODY RECEIVED:",
+      rawBody.slice(0, 1000)
+    );
+
+    let orderId = "";
+
+    // application/x-www-form-urlencoded
+    if (
+      contentType.includes(
+        "application/x-www-form-urlencoded"
+      )
+    ) {
+      const params =
+        new URLSearchParams(rawBody);
+
+      orderId = String(
+        params.get("order_id") || ""
+      ).trim();
+    }
+
+    // multipart/form-data
+    else if (
+      contentType.includes(
+        "multipart/form-data"
+      )
+    ) {
+      // Re-create request because body was already consumed
+      const bodyRequest = new Request(
+        "https://gamerzadda.in/api/pay0/webhook",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": contentType,
+          },
+          body: rawBody,
+        }
+      );
+
+      const formData =
+        await bodyRequest.formData();
+
+      orderId = String(
+        formData.get("order_id") || ""
+      ).trim();
+    }
+
+    // application/json
+    else if (
+      contentType.includes(
+        "application/json"
+      )
+    ) {
+      try {
+        const json =
+          JSON.parse(rawBody);
+
+        orderId = String(
+          json.order_id || ""
+        ).trim();
+      } catch (jsonError) {
+        console.error(
+          "WEBHOOK JSON BODY ERROR:",
+          jsonError
+        );
+      }
+    }
+
+    console.log(
+      "WEBHOOK STEP 3: ORDER ID:",
+      orderId
+    );
 
     if (!orderId) {
-      return new NextResponse("Missing order_id", {
-        status: 400,
-      });
+      console.error(
+        "WEBHOOK: Missing order_id"
+      );
+
+      return new NextResponse(
+        "Missing order_id",
+        { status: 400 }
+      );
     }
 
     // ==========================================
     // FIND ORDER
     // ==========================================
 
-    const { data: order, error: orderError } =
-      await supabaseAdmin
-        .from("deposit_orders")
-        .select(
-          `
-          id,
-          user_id,
-          order_id,
-          amount,
-          status,
-          bonus_percent,
-          bonus_amount,
-          processed_at
-          `
-        )
-        .eq("order_id", orderId)
-        .maybeSingle();
+    const {
+      data: order,
+      error: orderError,
+    } = await supabaseAdmin
+      .from("deposit_orders")
+      .select(
+        `
+        id,
+        user_id,
+        order_id,
+        amount,
+        status,
+        bonus_percent,
+        bonus_amount,
+        processed_at
+        `
+      )
+      .eq("order_id", orderId)
+      .maybeSingle();
 
-    console.log("WEBHOOK STEP 4: ORDER QUERY DONE");
+    console.log(
+      "WEBHOOK STEP 4: ORDER QUERY DONE"
+    );
 
     if (orderError) {
       console.error(
@@ -54,9 +140,10 @@ export async function POST(request: Request) {
         orderError
       );
 
-      return new NextResponse("Database error", {
-        status: 500,
-      });
+      return new NextResponse(
+        "Database error",
+        { status: 500 }
+      );
     }
 
     if (!order) {
@@ -65,9 +152,10 @@ export async function POST(request: Request) {
         orderId
       );
 
-      return new NextResponse("Order not found", {
-        status: 404,
-      });
+      return new NextResponse(
+        "Order not found",
+        { status: 404 }
+      );
     }
 
     console.log(
@@ -100,7 +188,7 @@ export async function POST(request: Request) {
     }
 
     // ==========================================
-    // PAY0 KEY
+    // PAY0 API KEY
     // ==========================================
 
     const pay0ApiKey =
@@ -108,7 +196,7 @@ export async function POST(request: Request) {
 
     if (!pay0ApiKey) {
       console.error(
-        "WEBHOOK STEP 6: PAY0_API_KEY MISSING"
+        "PAY0_API_KEY MISSING"
       );
 
       return new NextResponse(
@@ -177,7 +265,7 @@ export async function POST(request: Request) {
         JSON.parse(responseText);
     } catch (jsonError) {
       console.error(
-        "WEBHOOK STEP 10: JSON PARSE ERROR:",
+        "PAY0 JSON PARSE ERROR:",
         jsonError
       );
 
@@ -207,7 +295,7 @@ export async function POST(request: Request) {
       !verifyResult?.result
     ) {
       console.error(
-        "WEBHOOK STEP 11: PAY0 VERIFICATION FAILED:",
+        "PAY0 VERIFICATION FAILED:",
         verifyResult
       );
 
@@ -232,7 +320,7 @@ export async function POST(request: Request) {
       null;
 
     console.log(
-      "WEBHOOK STEP 12: PAYMENT DETAILS:",
+      "WEBHOOK STEP 11: PAYMENT DETAILS:",
       {
         orderId,
         txnStatus,
@@ -248,26 +336,18 @@ export async function POST(request: Request) {
 
     if (txnStatus !== "SUCCESS") {
       console.log(
-        "WEBHOOK STEP 13: PAYMENT NOT SUCCESS:",
+        "PAYMENT NOT SUCCESS:",
         txnStatus
       );
 
-      const { error } =
-        await supabaseAdmin
-          .from("deposit_orders")
-          .update({
-            status:
-              txnStatus || "PENDING",
-          })
-          .eq("order_id", orderId)
-          .neq("status", "SUCCESS");
-
-      if (error) {
-        console.error(
-          "STATUS UPDATE ERROR:",
-          error
-        );
-      }
+      await supabaseAdmin
+        .from("deposit_orders")
+        .update({
+          status:
+            txnStatus || "PENDING",
+        })
+        .eq("order_id", orderId)
+        .neq("status", "SUCCESS");
 
       return new NextResponse(
         "Payment pending",
@@ -276,7 +356,7 @@ export async function POST(request: Request) {
     }
 
     console.log(
-      "WEBHOOK STEP 13: PAYMENT SUCCESS"
+      "WEBHOOK STEP 12: PAYMENT SUCCESS"
     );
 
     // ==========================================
@@ -292,20 +372,18 @@ export async function POST(request: Request) {
     const orderAmountCents =
       Math.round(orderAmount * 100);
 
-    console.log(
-      "WEBHOOK STEP 14: AMOUNT CHECK:",
-      {
-        paidAmountCents,
-        orderAmountCents,
-      }
-    );
-
     if (
       !Number.isFinite(paidAmount) ||
-      paidAmountCents !== orderAmountCents
+      paidAmountCents !==
+        orderAmountCents
     ) {
       console.error(
-        "WEBHOOK STEP 15: AMOUNT MISMATCH"
+        "AMOUNT MISMATCH:",
+        {
+          orderId,
+          paidAmount,
+          orderAmount,
+        }
       );
 
       await supabaseAdmin
@@ -323,42 +401,31 @@ export async function POST(request: Request) {
     }
 
     console.log(
-      "WEBHOOK STEP 15: AMOUNT VERIFIED"
+      "WEBHOOK STEP 13: AMOUNT VERIFIED"
     );
 
     // ==========================================
-    // RPC START
+    // RPC
     // ==========================================
 
     console.log(
-      "WEBHOOK STEP 16: RPC START:",
-      {
-        orderId,
-        userId: order.user_id,
-        depositAmount: orderAmount,
-        bonusPercent: order.bonus_percent,
-        bonusAmount: order.bonus_amount,
-        utr,
-      }
+      "WEBHOOK STEP 14: RPC START"
     );
 
     const {
       data: result,
       error: processError,
-    } = await supabaseAdmin.rpc(
-      "process_successful_deposit",
-      {
-        p_order_id: orderId,
-        p_utr: utr,
-      }
-    );
-
-    // ==========================================
-    // RPC RESULT
-    // ==========================================
+    } =
+      await supabaseAdmin.rpc(
+        "process_successful_deposit",
+        {
+          p_order_id: orderId,
+          p_utr: utr,
+        }
+      );
 
     console.log(
-      "WEBHOOK STEP 17: RPC RESPONSE:",
+      "WEBHOOK STEP 15: RPC RESPONSE:",
       {
         orderId,
         result,
@@ -368,7 +435,7 @@ export async function POST(request: Request) {
 
     if (processError) {
       console.error(
-        "WEBHOOK STEP 18: RPC ERROR:",
+        "RPC ERROR:",
         processError
       );
 
@@ -379,11 +446,8 @@ export async function POST(request: Request) {
     }
 
     console.log(
-      "WEBHOOK STEP 19: DEPOSIT PROCESSED SUCCESSFULLY:",
-      {
-        orderId,
-        result,
-      }
+      "WEBHOOK STEP 16: DEPOSIT SUCCESS:",
+      result
     );
 
     return new NextResponse(
