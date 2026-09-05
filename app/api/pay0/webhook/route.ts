@@ -70,6 +70,15 @@ export async function POST(request: Request) {
       });
     }
 
+    console.log("Deposit order found:", {
+      orderId: order.order_id,
+      amount: order.amount,
+      status: order.status,
+      bonusPercent: order.bonus_percent,
+      bonusAmount: order.bonus_amount,
+      processedAt: order.processed_at,
+    });
+
     // ==========================================
     // ALREADY PROCESSED
     // ==========================================
@@ -123,6 +132,11 @@ export async function POST(request: Request) {
       orderId
     );
 
+    console.log(
+      "Calling Pay0 verification:",
+      orderId
+    );
+
     const verifyResponse =
       await fetch(
         PAY0_STATUS_URL,
@@ -140,7 +154,7 @@ export async function POST(request: Request) {
       );
 
     // ==========================================
-    // READ RESPONSE SAFELY
+    // READ PAY0 RESPONSE SAFELY
     // ==========================================
 
     const responseText =
@@ -151,7 +165,6 @@ export async function POST(request: Request) {
       verifyResponse.status
     );
 
-    // Pay0/Cloudflare may return HTML instead of JSON
     let verifyResult: any = null;
 
     try {
@@ -170,7 +183,7 @@ export async function POST(request: Request) {
     }
 
     console.log(
-      "Pay0 verification:",
+      "Pay0 verification result:",
       orderId,
       verifyResult
     );
@@ -186,7 +199,11 @@ export async function POST(request: Request) {
     ) {
       console.error(
         "Pay0 verification failed:",
-        verifyResult
+        {
+          orderId,
+          httpStatus: verifyResponse.status,
+          result: verifyResult,
+        }
       );
 
       return new NextResponse(
@@ -209,19 +226,38 @@ export async function POST(request: Request) {
       verifyResult.result.utr ||
       null;
 
+    console.log(
+      "Payment verification details:",
+      {
+        orderId,
+        txnStatus,
+        paidAmount,
+        orderAmount: Number(order.amount),
+        utr,
+      }
+    );
+
     // ==========================================
     // PAYMENT NOT SUCCESSFUL
     // ==========================================
 
     if (txnStatus !== "SUCCESS") {
-      await supabaseAdmin
-        .from("deposit_orders")
-        .update({
-          status:
-            txnStatus || "PENDING",
-        })
-        .eq("order_id", orderId)
-        .neq("status", "SUCCESS");
+      const { error: statusUpdateError } =
+        await supabaseAdmin
+          .from("deposit_orders")
+          .update({
+            status:
+              txnStatus || "PENDING",
+          })
+          .eq("order_id", orderId)
+          .neq("status", "SUCCESS");
+
+      if (statusUpdateError) {
+        console.error(
+          "Payment status update error:",
+          statusUpdateError
+        );
+      }
 
       console.log(
         "Payment not successful:",
@@ -242,10 +278,15 @@ export async function POST(request: Request) {
     const orderAmount =
       Number(order.amount);
 
+    const paidAmountCents =
+      Math.round(paidAmount * 100);
+
+    const orderAmountCents =
+      Math.round(orderAmount * 100);
+
     if (
       !Number.isFinite(paidAmount) ||
-      Math.round(paidAmount * 100) !==
-        Math.round(orderAmount * 100)
+      paidAmountCents !== orderAmountCents
     ) {
       console.error(
         "Amount mismatch:",
@@ -271,6 +312,22 @@ export async function POST(request: Request) {
     }
 
     // ==========================================
+    // BEFORE RPC
+    // ==========================================
+
+    console.log(
+      "ABOUT TO PROCESS DEPOSIT:",
+      {
+        orderId,
+        userId: order.user_id,
+        depositAmount: orderAmount,
+        bonusPercent: order.bonus_percent,
+        bonusAmount: order.bonus_amount,
+        utr,
+      }
+    );
+
+    // ==========================================
     // ATOMIC WALLET CREDIT
     // ==========================================
 
@@ -282,6 +339,19 @@ export async function POST(request: Request) {
       {
         p_order_id: orderId,
         p_utr: utr,
+      }
+    );
+
+    // ==========================================
+    // RPC RESULT
+    // ==========================================
+
+    console.log(
+      "RPC RESPONSE:",
+      {
+        orderId,
+        result,
+        processError,
       }
     );
 
@@ -297,15 +367,17 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(
-      "Deposit processed successfully:",
-      orderId,
-      result
-    );
-
     // ==========================================
     // SUCCESS
     // ==========================================
+
+    console.log(
+      "Deposit processed successfully:",
+      {
+        orderId,
+        result,
+      }
+    );
 
     return new NextResponse(
       "Payment credited successfully",
