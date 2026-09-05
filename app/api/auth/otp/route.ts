@@ -338,10 +338,12 @@ async function verifyOTP(
     };
   }
 
-  return {
+ return {
+  success: true,
+  response: NextResponse.json({
     success: true,
-    response: null,
-  };
+  }),
+};
 }
 
 export async function POST(request: Request) {
