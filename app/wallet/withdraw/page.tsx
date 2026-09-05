@@ -27,6 +27,7 @@ export default function WithdrawPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
+  const [todayWithdrawals, setTodayWithdrawals] = useState(0);
 
   useEffect(() => {
     loadWallet();
@@ -57,6 +58,8 @@ export default function WithdrawPage() {
           total: 0,
         }
       );
+
+      setTodayWithdrawals(Number(data.todayWithdrawals || 0));
     } catch {
       setError("Unable to load wallet.");
     } finally {
@@ -71,8 +74,9 @@ export default function WithdrawPage() {
       return 0;
     }
 
-    return Math.max(0, numericAmount - SERVICE_CHARGE);
-  }, [numericAmount]);
+    const serviceCharge = todayWithdrawals === 0 ? 5 : 10;
+    return Math.max(0, numericAmount - serviceCharge);
+  }, [numericAmount, todayWithdrawals]);
 
   function setQuickAmount(value: number) {
     setAmount(String(value));
@@ -297,7 +301,7 @@ export default function WithdrawPage() {
               </span>
 
               <span className="font-bold text-[#d32f2f]">
-                -₹5.00
+                -₹{(todayWithdrawals === 0 ? 5 : 10).toFixed(2)}
               </span>
             </div>
 
@@ -327,7 +331,7 @@ export default function WithdrawPage() {
           </button>
 
           <p className="mt-3 text-center text-[10px] text-[#89918b]">
-            ₹5 service charge applies to each withdrawal.
+            1st withdrawal of the day: ₹5 charge. 2nd onward: ₹10 charge.
           </p>
         </section>
       </div>
