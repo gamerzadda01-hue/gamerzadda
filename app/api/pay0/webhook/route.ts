@@ -1,278 +1,116 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-const PAY0_STATUS_URL =
-  "https://pay0.shop/api/check-order-status";
+const PAY0_STATUS_URL = "https://pay0.shop/api/check-order-status";
 
 export async function POST(request: Request) {
   try {
-    console.log("WEBHOOK STEP 1: START");
+    console.log("PAY0 WEBHOOK: START");
 
-    // ==========================================
-    // READ WEBHOOK BODY SAFELY
-    // ==========================================
-
-    const contentType =
-      request.headers.get("content-type") || "";
-
-    console.log(
-      "WEBHOOK CONTENT TYPE:",
-      contentType
-    );
-
+    // 1. Read webhook body
     const rawBody = await request.text();
 
-    console.log(
-      "WEBHOOK STEP 2: BODY RECEIVED:",
-      rawBody.slice(0, 1000)
-    );
+    console.log("PAY0 WEBHOOK BODY:", rawBody.slice(0, 1000));
 
     let orderId = "";
 
-    // application/x-www-form-urlencoded
-    if (
-      contentType.includes(
-        "application/x-www-form-urlencoded"
-      )
-    ) {
-      const params =
-        new URLSearchParams(rawBody);
-
-      orderId = String(
-        params.get("order_id") || ""
-      ).trim();
+    // Pay0 normally sends form-urlencoded
+    try {
+      const params = new URLSearchParams(rawBody);
+      orderId = String(params.get("order_id") || "").trim();
+    } catch (e) {
+      console.error("FORM PARSE ERROR:", e);
     }
 
-    // multipart/form-data
-    else if (
-      contentType.includes(
-        "multipart/form-data"
-      )
-    ) {
-      // Re-create request because body was already consumed
-      const bodyRequest = new Request(
-        "https://gamerzadda.in/api/pay0/webhook",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": contentType,
-          },
-          body: rawBody,
-        }
-      );
-
-      const formData =
-        await bodyRequest.formData();
-
-      orderId = String(
-        formData.get("order_id") || ""
-      ).trim();
-    }
-
-    // application/json
-    else if (
-      contentType.includes(
-        "application/json"
-      )
-    ) {
+    // Fallback: JSON body
+    if (!orderId) {
       try {
-        const json =
-          JSON.parse(rawBody);
-
-        orderId = String(
-          json.order_id || ""
-        ).trim();
-      } catch (jsonError) {
-        console.error(
-          "WEBHOOK JSON BODY ERROR:",
-          jsonError
-        );
+        const json = JSON.parse(rawBody);
+        orderId = String(json?.order_id || "").trim();
+      } catch {
+        // Not JSON
       }
     }
 
-    console.log(
-      "WEBHOOK STEP 3: ORDER ID:",
-      orderId
-    );
+    console.log("PAY0 WEBHOOK ORDER ID:", orderId);
 
     if (!orderId) {
-      console.error(
-        "WEBHOOK: Missing order_id"
-      );
-
-      return new NextResponse(
-        "Missing order_id",
-        { status: 400 }
-      );
+      return new NextResponse("Missing order_id", { status: 400 });
     }
 
-    // ==========================================
-    // FIND ORDER
-    // ==========================================
-
-    const {
-      data: order,
-      error: orderError,
-    } = await supabaseAdmin
+    // 2. Find deposit order
+    const { data: order, error: orderError } = await supabaseAdmin
       .from("deposit_orders")
       .select(
-        `
-        id,
-        user_id,
-        order_id,
-        amount,
-        status,
-        bonus_percent,
-        bonus_amount,
-        processed_at
-        `
+        "id,user_id,order_id,amount,status,bonus_percent,bonus_amount,processed_at"
       )
       .eq("order_id", orderId)
       .maybeSingle();
 
-    console.log(
-      "WEBHOOK STEP 4: ORDER QUERY DONE"
-    );
-
     if (orderError) {
-      console.error(
-        "ORDER QUERY ERROR:",
-        orderError
-      );
-
-      return new NextResponse(
-        "Database error",
-        { status: 500 }
-      );
+      console.error("ORDER QUERY ERROR:", orderError);
+      return new NextResponse("Database error", { status: 500 });
     }
 
     if (!order) {
-      console.error(
-        "ORDER NOT FOUND:",
-        orderId
-      );
-
-      return new NextResponse(
-        "Order not found",
-        { status: 404 }
-      );
+      console.error("ORDER NOT FOUND:", orderId);
+      return new NextResponse("Order not found", { status: 404 });
     }
 
-    console.log(
-      "WEBHOOK STEP 5: ORDER FOUND:",
-      {
-        orderId: order.order_id,
-        amount: order.amount,
-        status: order.status,
-        bonusPercent: order.bonus_percent,
-        bonusAmount: order.bonus_amount,
-      }
-    );
+    console.log("PAY0 WEBHOOK ORDER FOUND:", order);
 
-    // ==========================================
-    // ALREADY PROCESSED
-    // ==========================================
-
-    if (
-      order.status === "SUCCESS" ||
-      order.processed_at
-    ) {
-      console.log(
-        "WEBHOOK STEP 6: ALREADY PROCESSED"
-      );
-
-      return new NextResponse(
-        "Already processed",
-        { status: 200 }
-      );
+    // 3. Duplicate protection
+    if (order.status === "SUCCESS" || order.processed_at) {
+      console.log("PAY0 WEBHOOK: ALREADY PROCESSED");
+      return new NextResponse("Already processed", { status: 200 });
     }
 
-    // ==========================================
-    // PAY0 API KEY
-    // ==========================================
-
-    const pay0ApiKey =
-      process.env.PAY0_API_KEY;
+    // 4. Pay0 API key
+    const pay0ApiKey = process.env.PAY0_API_KEY;
 
     if (!pay0ApiKey) {
-      console.error(
-        "PAY0_API_KEY MISSING"
-      );
-
-      return new NextResponse(
-        "Server configuration error",
-        { status: 500 }
-      );
+      console.error("PAY0_API_KEY MISSING");
+      return new NextResponse("Server configuration error", {
+        status: 500,
+      });
     }
 
-    console.log(
-      "WEBHOOK STEP 6: PAY0 KEY FOUND"
-    );
+    // 5. Verify directly with Pay0
+    const verifyData = new URLSearchParams();
+    verifyData.set("user_token", pay0ApiKey);
+    verifyData.set("order_id", orderId);
 
-    // ==========================================
-    // VERIFY PAYMENT
-    // ==========================================
+    console.log("PAY0 VERIFICATION: CALLING API");
 
-    const verifyData =
-      new URLSearchParams();
+    const verifyResponse = await fetch(PAY0_STATUS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: verifyData.toString(),
+      cache: "no-store",
+    });
 
-    verifyData.append(
-      "user_token",
-      pay0ApiKey
-    );
-
-    verifyData.append(
-      "order_id",
-      orderId
-    );
+    const responseText = await verifyResponse.text();
 
     console.log(
-      "WEBHOOK STEP 7: CALLING PAY0"
-    );
-
-    const verifyResponse =
-      await fetch(
-        PAY0_STATUS_URL,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/x-www-form-urlencoded",
-            Accept: "application/json",
-          },
-          body:
-            verifyData.toString(),
-          cache: "no-store",
-        }
-      );
-
-    console.log(
-      "WEBHOOK STEP 8: PAY0 HTTP:",
+      "PAY0 VERIFICATION HTTP:",
       verifyResponse.status
     );
 
-    const responseText =
-      await verifyResponse.text();
-
     console.log(
-      "WEBHOOK STEP 9: PAY0 RESPONSE RECEIVED"
+      "PAY0 VERIFICATION RAW:",
+      responseText.slice(0, 2000)
     );
 
-    let verifyResult: any;
+    // 6. Parse Pay0 response safely
+    let verifyResult: any = null;
 
     try {
-      verifyResult =
-        JSON.parse(responseText);
-    } catch (jsonError) {
-      console.error(
-        "PAY0 JSON PARSE ERROR:",
-        jsonError
-      );
-
-      console.error(
-        "PAY0 RAW RESPONSE:",
-        responseText.slice(0, 1000)
-      );
+      verifyResult = JSON.parse(responseText);
+    } catch (error) {
+      console.error("PAY0 RESPONSE IS NOT JSON:", error);
 
       return new NextResponse(
         "Pay0 verification service unavailable",
@@ -280,18 +118,12 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(
-      "WEBHOOK STEP 10: PAY0 JSON OK:",
-      verifyResult
-    );
+    console.log("PAY0 VERIFICATION RESULT:", verifyResult);
 
-    // ==========================================
-    // VERIFY PAY0 RESULT
-    // ==========================================
-
+    // 7. Validate Pay0 response
     if (
       !verifyResponse.ok ||
-      !verifyResult?.status ||
+      verifyResult?.status !== true ||
       !verifyResult?.result
     ) {
       console.error(
@@ -305,86 +137,66 @@ export async function POST(request: Request) {
       );
     }
 
-    const txnStatus =
-      String(
-        verifyResult.result.txnStatus || ""
-      ).toUpperCase();
+    const txnStatus = String(
+      verifyResult.result.txnStatus || ""
+    ).toUpperCase();
 
-    const paidAmount =
-      Number(
-        verifyResult.result.amount || 0
-      );
-
-    const utr =
-      verifyResult.result.utr ||
-      null;
-
-    console.log(
-      "WEBHOOK STEP 11: PAYMENT DETAILS:",
-      {
-        orderId,
-        txnStatus,
-        paidAmount,
-        orderAmount: Number(order.amount),
-        utr,
-      }
+    const paidAmount = Number(
+      verifyResult.result.amount || 0
     );
 
-    // ==========================================
-    // PAYMENT NOT SUCCESS
-    // ==========================================
+    const utr = verifyResult.result.utr
+      ? String(verifyResult.result.utr)
+      : null;
 
+    console.log("PAY0 PAYMENT DETAILS:", {
+      orderId,
+      txnStatus,
+      paidAmount,
+      orderAmount: Number(order.amount),
+      utr,
+    });
+
+    // 8. Payment not successful
     if (txnStatus !== "SUCCESS") {
       console.log(
-        "PAYMENT NOT SUCCESS:",
+        "PAY0 PAYMENT NOT SUCCESS:",
         txnStatus
       );
 
       await supabaseAdmin
         .from("deposit_orders")
         .update({
-          status:
-            txnStatus || "PENDING",
+          status: txnStatus || "PENDING",
         })
         .eq("order_id", orderId)
         .neq("status", "SUCCESS");
 
-      return new NextResponse(
-        "Payment pending",
-        { status: 200 }
-      );
+      return new NextResponse("Payment pending", {
+        status: 200,
+      });
     }
 
-    console.log(
-      "WEBHOOK STEP 12: PAYMENT SUCCESS"
+    // 9. Amount verification
+    const orderAmount = Number(order.amount);
+
+    const paidAmountCents = Math.round(
+      paidAmount * 100
     );
 
-    // ==========================================
-    // AMOUNT CHECK
-    // ==========================================
-
-    const orderAmount =
-      Number(order.amount);
-
-    const paidAmountCents =
-      Math.round(paidAmount * 100);
-
-    const orderAmountCents =
-      Math.round(orderAmount * 100);
+    const orderAmountCents = Math.round(
+      orderAmount * 100
+    );
 
     if (
       !Number.isFinite(paidAmount) ||
-      paidAmountCents !==
-        orderAmountCents
+      paidAmountCents !== orderAmountCents
     ) {
-      console.error(
-        "AMOUNT MISMATCH:",
-        {
-          orderId,
-          paidAmount,
-          orderAmount,
-        }
-      );
+      console.error("AMOUNT MISMATCH:", {
+        orderId,
+        paidAmount,
+        orderAmount,
+      });
 
       await supabaseAdmin
         .from("deposit_orders")
@@ -394,28 +206,17 @@ export async function POST(request: Request) {
         .eq("order_id", orderId)
         .neq("status", "SUCCESS");
 
-      return new NextResponse(
-        "Amount mismatch",
-        { status: 400 }
-      );
+      return new NextResponse("Amount mismatch", {
+        status: 400,
+      });
     }
 
     console.log(
-      "WEBHOOK STEP 13: AMOUNT VERIFIED"
+      "PAY0 WEBHOOK: PAYMENT VERIFIED SUCCESSFULLY"
     );
 
-    // ==========================================
-    // RPC
-    // ==========================================
-
-    console.log(
-      "WEBHOOK STEP 14: RPC START"
-    );
-
-    const {
-      data: result,
-      error: processError,
-    } =
+    // 10. Process deposit + bonus atomically
+    const { data: result, error: processError } =
       await supabaseAdmin.rpc(
         "process_successful_deposit",
         {
@@ -424,18 +225,14 @@ export async function POST(request: Request) {
         }
       );
 
-    console.log(
-      "WEBHOOK STEP 15: RPC RESPONSE:",
-      {
-        orderId,
-        result,
-        processError,
-      }
-    );
+    console.log("DEPOSIT RPC RESULT:", {
+      result,
+      processError,
+    });
 
     if (processError) {
       console.error(
-        "RPC ERROR:",
+        "DEPOSIT RPC ERROR:",
         processError
       );
 
@@ -446,7 +243,7 @@ export async function POST(request: Request) {
     }
 
     console.log(
-      "WEBHOOK STEP 16: DEPOSIT SUCCESS:",
+      "PAY0 WEBHOOK: DEPOSIT CREDITED:",
       result
     );
 
@@ -454,16 +251,14 @@ export async function POST(request: Request) {
       "Payment credited successfully",
       { status: 200 }
     );
-
   } catch (error) {
     console.error(
-      "WEBHOOK FINAL ERROR:",
+      "PAY0 WEBHOOK FINAL ERROR:",
       error
     );
 
-    return new NextResponse(
-      "Webhook error",
-      { status: 500 }
-    );
+    return new NextResponse("Webhook error", {
+      status: 500,
+    });
   }
 }
