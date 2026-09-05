@@ -14,48 +14,153 @@ type Withdrawal = {
   admin_note: string | null;
   created_at: string;
   processed_at: string | null;
+
   users?: {
+    full_name?: string | null;
     email?: string | null;
+    phone?: string | null;
     game_name?: string | null;
     free_fire_uid?: string | null;
   } | null;
 };
 
+const tabs = [
+  {
+    key: "pending",
+    label: "Pending",
+  },
+  {
+    key: "approved",
+    label: "Approved",
+  },
+  {
+    key: "rejected",
+    label: "Rejected",
+  },
+  {
+    key: "all",
+    label: "All",
+  },
+];
+
+function money(
+  value: number | null | undefined
+) {
+  return `₹${Number(value || 0).toFixed(2)}`;
+}
+
+function formatDate(value: string) {
+  if (!value) return "-";
+
+  try {
+    return new Date(value).toLocaleString(
+      "en-IN",
+      {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }
+    );
+  } catch {
+    return value;
+  }
+}
+
 export default function AdminWithdrawalsPage() {
-  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [status, setStatus] = useState("pending");
-  const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState<string | null>(null);
+  const [withdrawals, setWithdrawals] =
+    useState<Withdrawal[]>([]);
+
+  const [status, setStatus] =
+    useState("pending");
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [processing, setProcessing] =
+    useState<string | null>(null);
+
+  const [error, setError] =
+    useState("");
+
+  async function getToken() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    return session?.access_token || null;
+  }
 
   async function loadWithdrawals() {
     setLoading(true);
+    setError("");
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
+    try {
+      const token = await getToken();
 
-    if (!token) {
-      window.location.href = "/admin/login";
-      return;
-    }
-
-    const response = await fetch(
-      `/api/admin/withdrawals?status=${encodeURIComponent(status)}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
+      if (!token) {
+        window.location.href =
+          "/admin/login";
+        return;
       }
-    );
 
-    const data = await response.json();
+      const response = await fetch(
+        `/api/admin/withdrawals?status=${encodeURIComponent(
+          status
+        )}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        }
+      );
 
-    if (!response.ok) {
-      alert(data.error || "Unable to load withdrawals.");
+      const text =
+        await response.text();
+
+      let data: any = {};
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = {
+          error:
+            text ||
+            `Server returned ${response.status}`,
+        };
+      }
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          window.location.href =
+            "/admin/login";
+          return;
+        }
+
+        setError(
+          data.error ||
+            "Unable to load withdrawals."
+        );
+
+        setWithdrawals([]);
+        return;
+      }
+
+      setWithdrawals(
+        data.withdrawals || []
+      );
+    } catch (err: any) {
+      console.error(err);
+
+      setError(
+        err?.message ||
+          "Unable to load withdrawals."
+      );
+
+      setWithdrawals([]);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setWithdrawals(data.withdrawals || []);
-    setLoading(false);
   }
 
   useEffect(() => {
@@ -68,54 +173,89 @@ export default function AdminWithdrawalsPage() {
   ) {
     if (action === "approve") {
       const ok = window.confirm(
-        `Approve ₹${Number(withdrawal.net_amount ?? withdrawal.amount).toFixed(2)} to ${withdrawal.upi_id}?`
+        `Approve ${money(
+          withdrawal.net_amount ??
+            withdrawal.amount
+        )} payment to ${
+          withdrawal.upi_id
+        }?`
       );
-      if (!ok) return;
-    } else {
-      const note = window.prompt("Rejection reason:");
-      if (note === null) return;
 
-      await submitAction(withdrawal, action, note);
-      return;
+      if (!ok) return;
     }
 
-    await submitAction(withdrawal, action, "");
-  }
+    let note = "";
 
-  async function submitAction(
-    withdrawal: Withdrawal,
-    action: "approve" | "reject",
-    note: string
-  ) {
-    setProcessing(withdrawal.id);
+    if (action === "reject") {
+      const entered =
+        window.prompt(
+          "Enter rejection reason:"
+        );
 
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-
-      if (!token) {
-        alert("Admin session expired. Please login again.");
-        window.location.href = "/admin/login";
+      if (entered === null) {
         return;
       }
 
-      const response = await fetch("/api/admin/withdrawals", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          withdrawalId: withdrawal.id,
-          action,
-          note,
-        }),
-      });
+      note = entered.trim();
+    }
 
-      const data = await response.json();
+    setProcessing(withdrawal.id);
+    setError("");
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        window.location.href =
+          "/admin/login";
+        return;
+      }
+
+      const response = await fetch(
+        "/api/admin/withdrawals",
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            withdrawalId:
+              withdrawal.id,
+            action,
+            note,
+          }),
+        }
+      );
+
+      const text =
+        await response.text();
+
+      let data: any = {};
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = {
+          error:
+            text ||
+            `Server returned ${response.status}`,
+        };
+      }
 
       if (!response.ok) {
-        alert(data.error || "Unable to process withdrawal.");
+        if (response.status === 401) {
+          window.location.href =
+            "/admin/login";
+          return;
+        }
+
+        alert(
+          data.error ||
+            "Unable to process withdrawal."
+        );
+
         return;
       }
 
@@ -126,65 +266,86 @@ export default function AdminWithdrawalsPage() {
       );
 
       await loadWithdrawals();
-    } catch (error: any) {
-      alert(error?.message || "Something went wrong.");
+    } catch (err: any) {
+      console.error(err);
+
+      alert(
+        err?.message ||
+          "Something went wrong."
+      );
     } finally {
       setProcessing(null);
     }
-  }
-
-  function money(value: number | null | undefined) {
-    return `₹${Number(value || 0).toFixed(2)}`;
-  }
-
-  function date(value: string) {
-    return new Date(value).toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
   }
 
   return (
     <main
       style={{
         minHeight: "100vh",
-        background: "#f5f5f5",
+        background: "#f5f7fb",
         padding: "24px",
       }}
     >
-      <div style={{ maxWidth: 1250, margin: "0 auto" }}>
+      <div
+        style={{
+          maxWidth: 1250,
+          margin: "0 auto",
+        }}
+      >
         <div
           style={{
             display: "flex",
-            justifyContent: "space-between",
+            justifyContent:
+              "space-between",
             alignItems: "center",
-            gap: 15,
-            flexWrap: "wrap",
+            gap: 16,
             marginBottom: 20,
+            flexWrap: "wrap",
           }}
         >
           <div>
-            <h1 style={{ margin: 0 }}>💸 Withdrawal Management</h1>
-            <p style={{ color: "#666", marginTop: 6 }}>
-              Review and process user withdrawal requests.
+            <h1
+              style={{
+                margin: 0,
+                fontSize: 28,
+                fontWeight: 900,
+              }}
+            >
+              Withdrawal Management
+            </h1>
+
+            <p
+              style={{
+                margin:
+                  "6px 0 0",
+                color: "#666",
+                fontSize: 14,
+              }}
+            >
+              Review and process user
+              withdrawal requests.
             </p>
           </div>
 
           <button
             onClick={loadWithdrawals}
+            disabled={loading}
             style={{
-              padding: "11px 16px",
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              background: "#fff",
-              fontWeight: 700,
-              cursor: "pointer",
+              border: "none",
+              borderRadius: 10,
+              padding:
+                "11px 16px",
+              background: "#111827",
+              color: "#fff",
+              fontWeight: 800,
+              cursor: loading
+                ? "not-allowed"
+                : "pointer",
             }}
           >
-            🔄 Refresh
+            {loading
+              ? "Refreshing..."
+              : "↻ Refresh"}
           </button>
         </div>
 
@@ -193,214 +354,462 @@ export default function AdminWithdrawalsPage() {
             display: "flex",
             gap: 8,
             flexWrap: "wrap",
-            marginBottom: 18,
+            marginBottom: 20,
           }}
         >
-          {[
-            ["pending", "⏳ Pending"],
-            ["approved", "✅ Approved"],
-            ["rejected", "❌ Rejected"],
-            ["all", "📋 All"],
-          ].map(([value, label]) => (
+          {tabs.map((tab) => (
             <button
-              key={value}
-              onClick={() => setStatus(value)}
+              key={tab.key}
+              onClick={() =>
+                setStatus(tab.key)
+              }
               style={{
-                padding: "10px 15px",
-                borderRadius: 8,
-                border: "1px solid #ddd",
-                background: status === value ? "#111" : "#fff",
-                color: status === value ? "#fff" : "#222",
-                fontWeight: 700,
+                border:
+                  "1px solid #ddd",
+                borderRadius: 10,
+                padding:
+                  "10px 16px",
+                background:
+                  status === tab.key
+                    ? "#111827"
+                    : "#fff",
+                color:
+                  status === tab.key
+                    ? "#fff"
+                    : "#333",
+                fontWeight: 800,
                 cursor: "pointer",
               }}
             >
-              {label}
+              {tab.label}
             </button>
           ))}
         </div>
+
+        {error && (
+          <div
+            style={{
+              background: "#fef2f2",
+              border:
+                "1px solid #fecaca",
+              color: "#b91c1c",
+              padding: 14,
+              borderRadius: 10,
+              marginBottom: 16,
+              fontSize: 14,
+              fontWeight: 700,
+              whiteSpace:
+                "pre-wrap",
+            }}
+          >
+            {error}
+          </div>
+        )}
 
         {loading ? (
           <div
             style={{
               background: "#fff",
-              borderRadius: 12,
-              padding: 40,
+              borderRadius: 14,
+              padding: 50,
               textAlign: "center",
+              color: "#666",
             }}
           >
             Loading withdrawals...
           </div>
-        ) : withdrawals.length === 0 ? (
+        ) : withdrawals.length ===
+          0 ? (
           <div
             style={{
               background: "#fff",
-              borderRadius: 12,
-              padding: 50,
+              borderRadius: 14,
+              padding: 60,
               textAlign: "center",
               color: "#777",
             }}
           >
-            <div style={{ fontSize: 40 }}>💸</div>
-            <h3>No {status === "all" ? "" : status} withdrawals</h3>
+            <div
+              style={{
+                fontSize: 42,
+              }}
+            >
+              💸
+            </div>
+
+            <h3
+              style={{
+                color: "#222",
+              }}
+            >
+              No{" "}
+              {status === "all"
+                ? ""
+                : status}{" "}
+              withdrawals
+            </h3>
+
+            <p>
+              Withdrawal requests
+              will appear here.
+            </p>
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 14 }}>
-            {withdrawals.map((w) => (
-              <div
-                key={w.id}
-                style={{
-                  background: "#fff",
-                  border: "1px solid #e5e5e5",
-                  borderRadius: 14,
-                  padding: 18,
-                  boxShadow: "0 2px 8px rgba(0,0,0,.04)",
-                }}
-              >
+          <div
+            style={{
+              display: "grid",
+              gap: 14,
+            }}
+          >
+            {withdrawals.map(
+              (w) => (
                 <div
+                  key={w.id}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "minmax(220px,1.4fr) minmax(180px,1fr) minmax(160px,.8fr) auto",
-                    gap: 18,
-                    alignItems: "center",
+                    background: "#fff",
+                    border:
+                      "1px solid #e5e7eb",
+                    borderRadius: 14,
+                    padding: 20,
+                    boxShadow:
+                      "0 2px 10px rgba(0,0,0,.04)",
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 16 }}>
-                      {w.users?.game_name || "Unknown User"}
-                    </div>
-                    <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>
-                      {w.users?.email || "-"}
-                    </div>
-                    <div style={{ color: "#666", fontSize: 12, marginTop: 3 }}>
-                      UID: {w.users?.free_fire_uid || "-"}
-                    </div>
-                    <div style={{ color: "#999", fontSize: 11, marginTop: 7 }}>
-                      {date(w.created_at)}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 12, color: "#777" }}>UPI ID</div>
-                    <div
-                      style={{
-                        fontWeight: 800,
-                        marginTop: 4,
-                        wordBreak: "break-all",
-                      }}
-                    >
-                      {w.upi_id}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 12, color: "#777" }}>
-                      Requested
-                    </div>
-                    <div style={{ fontSize: 20, fontWeight: 900 }}>
-                      {money(w.amount)}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#777" }}>
-                      Charge: -{money(w.service_charge)}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        color: "#15803d",
-                        fontWeight: 800,
-                      }}
-                    >
-                      Pay: {money(w.net_amount)}
-                    </div>
-                  </div>
-
-                  <div style={{ textAlign: "right" }}>
-                    <div
-                      style={{
-                        display: "inline-block",
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                        background:
-                          w.status === "pending"
-                            ? "#fff7ed"
-                            : w.status === "approved"
-                            ? "#ecfdf5"
-                            : "#fef2f2",
-                        color:
-                          w.status === "pending"
-                            ? "#c2410c"
-                            : w.status === "approved"
-                            ? "#15803d"
-                            : "#b91c1c",
-                        fontSize: 12,
-                        fontWeight: 800,
-                        textTransform: "capitalize",
-                      }}
-                    >
-                      {w.status}
-                    </div>
-
-                    {w.status === "pending" && (
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          marginTop: 12,
-                          justifyContent: "flex-end",
-                        }}
-                      >
-                        <button
-                          disabled={processing === w.id}
-                          onClick={() => processWithdrawal(w, "approve")}
-                          style={{
-                            padding: "9px 12px",
-                            border: "none",
-                            borderRadius: 8,
-                            background: "#16a34a",
-                            color: "#fff",
-                            fontWeight: 800,
-                            cursor: "pointer",
-                          }}
-                        >
-                          {processing === w.id ? "..." : "✓ Approve"}
-                        </button>
-
-                        <button
-                          disabled={processing === w.id}
-                          onClick={() => processWithdrawal(w, "reject")}
-                          style={{
-                            padding: "9px 12px",
-                            border: "none",
-                            borderRadius: 8,
-                            background: "#dc2626",
-                            color: "#fff",
-                            fontWeight: 800,
-                            cursor: "pointer",
-                          }}
-                        >
-                          {processing === w.id ? "..." : "✕ Reject"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {w.admin_note && (
                   <div
                     style={{
-                      marginTop: 14,
-                      padding: 10,
-                      background: "#f8f8f8",
-                      borderRadius: 8,
-                      fontSize: 13,
+                      display: "grid",
+                      gridTemplateColumns:
+                        "minmax(250px,1.5fr) minmax(190px,1fr) minmax(170px,.8fr) auto",
+                      gap: 20,
+                      alignItems:
+                        "center",
                     }}
                   >
-                    <strong>Admin note:</strong> {w.admin_note}
+                    {/* USER */}
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          color: "#111",
+                        }}
+                      >
+                        {w.users
+                          ?.full_name ||
+                          "Unknown User"}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "#333",
+                        }}
+                      >
+                        🎮{" "}
+                        {w.users
+                          ?.game_name ||
+                          "-"}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 13,
+                          color: "#555",
+                        }}
+                      >
+                        📱{" "}
+                        {w.users
+                          ?.phone ||
+                          "-"}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 3,
+                          fontSize: 13,
+                          color: "#555",
+                        }}
+                      >
+                        📧{" "}
+                        {w.users
+                          ?.email ||
+                          "-"}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 3,
+                          fontSize: 13,
+                          color: "#555",
+                        }}
+                      >
+                        UID:{" "}
+                        <strong>
+                          {w.users
+                            ?.free_fire_uid ||
+                            "-"}
+                        </strong>
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 8,
+                          fontSize: 11,
+                          color: "#999",
+                        }}
+                      >
+                        Requested:{" "}
+                        {formatDate(
+                          w.created_at
+                        )}
+                      </div>
+
+                      {w.processed_at && (
+                        <div
+                          style={{
+                            marginTop: 3,
+                            fontSize: 11,
+                            color: "#999",
+                          }}
+                        >
+                          Processed:{" "}
+                          {formatDate(
+                            w.processed_at
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* UPI */}
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#777",
+                        }}
+                      >
+                        UPI ID
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 5,
+                          fontSize: 15,
+                          fontWeight: 900,
+                          wordBreak:
+                            "break-all",
+                          color: "#111",
+                        }}
+                      >
+                        {w.upi_id}
+                      </div>
+                    </div>
+
+                    {/* AMOUNT */}
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#777",
+                        }}
+                      >
+                        Requested Amount
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 2,
+                          fontSize: 23,
+                          fontWeight: 900,
+                        }}
+                      >
+                        {money(
+                          w.amount
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 3,
+                          fontSize: 12,
+                          color: "#777",
+                        }}
+                      >
+                        Service Charge:{" "}
+                        {money(
+                          w.service_charge
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 15,
+                          color: "#15803d",
+                          fontWeight: 900,
+                        }}
+                      >
+                        Pay:{" "}
+                        {money(
+                          w.net_amount
+                        )}
+                      </div>
+                    </div>
+
+                    {/* STATUS / ACTION */}
+                    <div
+                      style={{
+                        textAlign:
+                          "right",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display:
+                            "inline-block",
+                          padding:
+                            "7px 11px",
+                          borderRadius:
+                            999,
+                          background:
+                            w.status ===
+                            "pending"
+                              ? "#fff7ed"
+                              : w.status ===
+                                "approved"
+                              ? "#ecfdf5"
+                              : "#fef2f2",
+                          color:
+                            w.status ===
+                            "pending"
+                              ? "#c2410c"
+                              : w.status ===
+                                "approved"
+                              ? "#15803d"
+                              : "#b91c1c",
+                          fontSize: 12,
+                          fontWeight: 900,
+                          textTransform:
+                            "capitalize",
+                        }}
+                      >
+                        {w.status}
+                      </div>
+
+                      {w.status ===
+                        "pending" && (
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            gap: 8,
+                            marginTop: 12,
+                            justifyContent:
+                              "flex-end",
+                          }}
+                        >
+                          <button
+                            disabled={
+                              processing ===
+                              w.id
+                            }
+                            onClick={() =>
+                              processWithdrawal(
+                                w,
+                                "approve"
+                              )
+                            }
+                            style={{
+                              border:
+                                "none",
+                              borderRadius:
+                                8,
+                              padding:
+                                "9px 12px",
+                              background:
+                                "#16a34a",
+                              color:
+                                "#fff",
+                              fontWeight:
+                                900,
+                              cursor:
+                                processing ===
+                                w.id
+                                  ? "not-allowed"
+                                  : "pointer",
+                            }}
+                          >
+                            {processing ===
+                            w.id
+                              ? "..."
+                              : "✓ Approve"}
+                          </button>
+
+                          <button
+                            disabled={
+                              processing ===
+                              w.id
+                            }
+                            onClick={() =>
+                              processWithdrawal(
+                                w,
+                                "reject"
+                              )
+                            }
+                            style={{
+                              border:
+                                "none",
+                              borderRadius:
+                                8,
+                              padding:
+                                "9px 12px",
+                              background:
+                                "#dc2626",
+                              color:
+                                "#fff",
+                              fontWeight:
+                                900,
+                              cursor:
+                                processing ===
+                                w.id
+                                  ? "not-allowed"
+                                  : "pointer",
+                            }}
+                          >
+                            {processing ===
+                            w.id
+                              ? "..."
+                              : "✕ Reject"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+
+                  {w.admin_note && (
+                    <div
+                      style={{
+                        marginTop: 16,
+                        padding: 12,
+                        background:
+                          "#f8fafc",
+                        borderRadius: 9,
+                        fontSize: 13,
+                        color: "#444",
+                      }}
+                    >
+                      <strong>
+                        Admin Note:
+                      </strong>{" "}
+                      {w.admin_note}
+                    </div>
+                  )}
+                </div>
+              )
+            )}
           </div>
         )}
       </div>
