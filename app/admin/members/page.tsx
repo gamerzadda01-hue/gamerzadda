@@ -33,6 +33,12 @@ export default function MembersPage() {
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+  const [savingWallet, setSavingWallet] = useState(false);
+  const [walletType, setWalletType] = useState("deposit");
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [adjustNote, setAdjustNote] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
 
   useEffect(() => {
     loadMembers();
@@ -83,6 +89,8 @@ export default function MembersPage() {
   async function openMember(member: Member) {
     setSelectedMember(member);
     setWallet(null);
+    setHistory([]);
+    setActionMessage("");
     setWalletLoading(true);
 
     try {
@@ -118,11 +126,70 @@ export default function MembersPage() {
       }
 
       setWallet(result.wallet || null);
+      setHistory(result.history || []);
     } catch (err) {
       console.error(err);
       setWallet(null);
+      setHistory([]);
     } finally {
       setWalletLoading(false);
+    }
+  }
+
+  async function adjustWallet() {
+    if (!selectedMember) return;
+
+    const amount = Number(adjustAmount);
+    if (!Number.isFinite(amount) || amount === 0) {
+      setActionMessage("Enter a valid amount. Use negative value to deduct.");
+      return;
+    }
+
+    if (Math.round(amount * 100) / 100 !== amount) {
+      setActionMessage("Maximum 2 decimal places allowed.");
+      return;
+    }
+
+    setSavingWallet(true);
+    setActionMessage("");
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Admin login required.");
+
+      const response = await fetch("/api/admin/members", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          userId: selectedMember.id,
+          walletType,
+          amount,
+          note: adjustNote || "Admin wallet adjustment",
+        }),
+      });
+
+      const raw = await response.text();
+      const result = raw ? JSON.parse(raw) : null;
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to change wallet.");
+      }
+
+      setWallet(result.wallet || null);
+      setHistory((old) => [result.transaction, ...old].filter(Boolean));
+      setAdjustAmount("");
+      setAdjustNote("");
+      setActionMessage("Wallet updated successfully.");
+      await loadMembers();
+    } catch (err: any) {
+      console.error(err);
+      setActionMessage(err?.message || "Unable to change wallet.");
+    } finally {
+      setSavingWallet(false);
     }
   }
 
@@ -595,6 +662,126 @@ export default function MembersPage() {
           font-weight: 900;
         }
 
+        .edit-box {
+          margin-top: 12px;
+          padding: 12px;
+          border: 1px solid #253448;
+          border-radius: 9px;
+          background: #0d1520;
+        }
+
+        .edit-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+
+        .edit-input, .edit-select {
+          width: 100%;
+          height: 36px;
+          box-sizing: border-box;
+          border: 1px solid #263448;
+          border-radius: 7px;
+          background: #101925;
+          color: #fff;
+          padding: 0 10px;
+          font-size: 10px;
+          outline: none;
+        }
+
+        .edit-note {
+          width: 100%;
+          height: 54px;
+          resize: vertical;
+          box-sizing: border-box;
+          border: 1px solid #263448;
+          border-radius: 7px;
+          background: #101925;
+          color: #fff;
+          padding: 9px 10px;
+          font-size: 10px;
+          outline: none;
+          margin-bottom: 8px;
+        }
+
+        .adjust-btn {
+          width: 100%;
+          height: 36px;
+          border: 0;
+          border-radius: 7px;
+          background: #ef1638;
+          color: #fff;
+          font-size: 10px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .adjust-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+        .action-message {
+          margin-top: 8px;
+          color: #8ed8ae;
+          font-size: 9px;
+        }
+
+        .history-list {
+          display: flex;
+          flex-direction: column;
+          gap: 7px;
+          max-height: 330px;
+          overflow-y: auto;
+        }
+
+        .history-item {
+          padding: 10px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
+        }
+
+        .history-top {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+        }
+
+        .history-amount {
+          font-size: 11px;
+          font-weight: 900;
+        }
+
+        .history-amount.credit { color: #66d69b; }
+        .history-amount.debit { color: #ff647b; }
+
+        .history-type {
+          color: #718096;
+          font-size: 8px;
+          text-transform: uppercase;
+          font-weight: 800;
+        }
+
+        .history-desc {
+          margin-top: 5px;
+          color: #b1bdcc;
+          font-size: 9px;
+        }
+
+        .history-date {
+          margin-top: 4px;
+          color: #65748a;
+          font-size: 8px;
+        }
+
+        .no-history {
+          padding: 15px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          color: #65748a;
+          font-size: 9px;
+          text-align: center;
+        }
+
         @media (max-width: 700px) {
           .members-page {
             padding: 16px;
@@ -959,6 +1146,61 @@ export default function MembersPage() {
                       {money(wallet?.winning_balance)}
                     </div>
                   </div>
+                </div>
+              )}
+
+              <div className="edit-box">
+                <div className="section-title">Admin Wallet Adjustment</div>
+                <div className="edit-row">
+                  <select className="edit-select" value={walletType} onChange={(e) => setWalletType(e.target.value)}>
+                    <option value="deposit">Deposit Wallet</option>
+                    <option value="bonus">Bonus Wallet</option>
+                    <option value="winning">Winning Wallet</option>
+                  </select>
+                  <input
+                    className="edit-input"
+                    type="number"
+                    step="0.01"
+                    placeholder="Amount (+ credit / - debit)"
+                    value={adjustAmount}
+                    onChange={(e) => setAdjustAmount(e.target.value)}
+                  />
+                </div>
+                <textarea
+                  className="edit-note"
+                  placeholder="Reason / note (optional)"
+                  value={adjustNote}
+                  onChange={(e) => setAdjustNote(e.target.value)}
+                />
+                <button className="adjust-btn" onClick={adjustWallet} disabled={savingWallet}>
+                  {savingWallet ? "Updating..." : "Update Wallet"}
+                </button>
+                {actionMessage && <div className="action-message">{actionMessage}</div>}
+              </div>
+            </div>
+
+            <div className="section">
+              <div className="section-title">Wallet History</div>
+              {history.length === 0 ? (
+                <div className="no-history">No wallet transactions yet.</div>
+              ) : (
+                <div className="history-list">
+                  {history.map((tx) => {
+                    const numericAmount = Number(tx.amount || 0);
+                    const isCredit = numericAmount >= 0 || String(tx.type || "").toLowerCase() === "credit";
+                    return (
+                      <div className="history-item" key={`${tx.id}-${tx.created_at}`}>
+                        <div className="history-top">
+                          <span className={`history-amount ${isCredit ? "credit" : "debit"}`}>
+                            {isCredit ? "+" : "-"}{money(Math.abs(numericAmount))}
+                          </span>
+                          <span className="history-type">{tx.type || "transaction"}</span>
+                        </div>
+                        <div className="history-desc">{tx.description || "Wallet transaction"}</div>
+                        <div className="history-date">{formatDate(tx.created_at)}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
