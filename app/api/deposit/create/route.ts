@@ -148,9 +148,10 @@ export async function POST(request: Request) {
       orderId
     );
 
+    // After payment, return the user to the GamerzAdda wallet page.
     formData.append(
       "redirect_url",
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/wallet`
+      `${process.env.NEXT_PUBLIC_APP_URL}/wallet`
     );
 
     formData.append(
