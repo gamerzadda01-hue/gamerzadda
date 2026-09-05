@@ -662,13 +662,36 @@ export default function AdminPage() {
     <main
       style={{
         minHeight: "100vh",
-        background: "#f5f5f5",
-        padding: "25px",
+        background: "linear-gradient(135deg,#070b14 0%,#0b1220 45%,#101827 100%)",
+        padding: "18px",
+        color: "#e5e7eb",
       }}
     >
+      <style jsx global>{`
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body { margin: 0; background: #070b14; }
+        h1 { letter-spacing: -.02em; }
+        h2 { font-size: 16px !important; letter-spacing: -.01em; }
+        h3 { font-size: 14px !important; }
+        p, label, button, input, select, textarea { font-size: 11px !important; }
+        p { color: #8190a7 !important; }
+        label { color: #aebbd0 !important; font-weight: 600; }
+        a { transition: .18s ease; }
+        a:hover { transform: translateY(-2px); border-color: #3b82f6 !important; background: #121d2f !important; }
+        button { transition: .15s ease; }
+        button:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+        input:focus, select:focus, textarea:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,.12); }
+        @media (max-width: 1100px) {
+          div[style*="repeat(6,minmax(0,1fr))"] { grid-template-columns: repeat(3,minmax(0,1fr)) !important; }
+        }
+        @media (max-width: 650px) {
+          div[style*="repeat(6,minmax(0,1fr))"] { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+        }
+      `}</style>
       <div
         style={{
-          maxWidth: "1200px",
+          maxWidth: "1380px",
           margin: "0 auto",
         }}
       >
@@ -687,7 +710,7 @@ export default function AdminPage() {
             <h1
               style={{
                 margin: 0,
-                fontSize: "30px",
+                fontSize: "24px",
                 fontWeight: "800",
               }}
             >
@@ -1345,7 +1368,7 @@ function StatCard({
     <div style={statCardStyle}>
       <div style={{fontSize:"28px"}}>{icon}</div>
       <div>
-        <div style={{fontSize:"12px",color:"#777",marginBottom:"5px"}}>{label}</div>
+        <div style={{fontSize:"12px",color:"#7f8da3 !important",marginBottom:"5px"}}>{label}</div>
         <strong style={{fontSize:"24px"}}>{value}</strong>
       </div>
     </div>
@@ -1367,8 +1390,8 @@ function QuickAction({
     <a href={target} style={quickActionStyle}>
       <span style={{fontSize:"25px"}}>{icon}</span>
       <span>
-        <strong style={{display:"block",color:"#111"}}>{title}</strong>
-        <small style={{color:"#777"}}>{description}</small>
+        <strong style={{display:"block",color:"#e5e7eb !important"}}>{title}</strong>
+        <small style={{color:"#7f8da3 !important"}}>{description}</small>
       </span>
     </a>
   );
@@ -1448,7 +1471,7 @@ function TournamentCard({
             style={{
               marginTop: 0,
               marginBottom: "8px",
-              fontSize: "21px",
+              fontSize: "17px",
             }}
           >
             {tournament.title}
@@ -1745,143 +1768,153 @@ function formatDateLocal(
 
 const dashboardGrid: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
-  gap: "14px",
-  marginTop: "25px",
+  gridTemplateColumns: "repeat(6,minmax(0,1fr))",
+  gap: "10px",
+  marginTop: "18px",
 };
 
 const statCardStyle: React.CSSProperties = {
-  background: "#fff",
-  borderRadius: "12px",
-  padding: "18px",
+  background: "linear-gradient(145deg,#121a29,#0e1624)",
+  border: "1px solid #243047",
+  borderRadius: "10px",
+  padding: "12px",
   display: "flex",
   alignItems: "center",
-  gap: "14px",
-  boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+  gap: "10px",
+  boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+  minWidth: 0,
 };
 
 const quickGrid: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
-  gap: "12px",
+  gridTemplateColumns: "repeat(6,minmax(0,1fr))",
+  gap: "9px",
 };
 
 const quickActionStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: "12px",
-  padding: "15px",
-  border: "1px solid #e5e5e5",
-  borderRadius: "10px",
+  gap: "9px",
+  padding: "11px",
+  border: "1px solid #26334a",
+  borderRadius: "9px",
   textDecoration: "none",
-  background: "#fff",
+  background: "#0e1624",
+  color: "#e5e7eb",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,.03)",
 };
 
 const cardStyle: React.CSSProperties = {
-  background: "#fff",
-  padding: "25px",
+  background: "linear-gradient(145deg,#111927,#0d1522)",
+  border: "1px solid #202c41",
+  padding: "18px",
   borderRadius: "12px",
-  marginTop: "25px",
-  marginBottom: "25px",
-  boxShadow:
-    "0 2px 10px rgba(0,0,0,0.05)",
+  marginTop: "16px",
+  marginBottom: "16px",
+  boxShadow: "0 10px 30px rgba(0,0,0,.18)",
 };
 
 const inputStyle: React.CSSProperties = {
   display: "block",
   width: "100%",
   boxSizing: "border-box",
-  padding: "12px",
-  marginTop: "6px",
-  border: "1px solid #ccc",
+  padding: "9px 10px",
+  marginTop: "5px",
+  border: "1px solid #2b3952",
   borderRadius: "7px",
-  fontSize: "15px",
-  background: "#fff",
+  fontSize: "12px",
+  background: "#0a111d",
+  color: "#e5e7eb",
+  outline: "none",
 };
 
 const primaryButton: React.CSSProperties = {
-  padding: "12px 18px",
-  border: "none",
-  borderRadius: "8px",
-  background: "#e50914",
+  padding: "9px 13px",
+  border: "1px solid #ff3341",
+  borderRadius: "7px",
+  background: "linear-gradient(135deg,#e50914,#b90710)",
   color: "#fff",
-  fontSize: "15px",
-  fontWeight: "bold",
+  fontSize: "12px",
+  fontWeight: "700",
   cursor: "pointer",
+  boxShadow: "0 5px 16px rgba(229,9,20,.22)",
 };
 
 const secondaryButton: React.CSSProperties = {
-  padding: "9px 13px",
-  border: "1px solid #ddd",
+  padding: "7px 10px",
+  border: "1px solid #2b3952",
   borderRadius: "7px",
-  background: "#fff",
-  color: "#222",
-  fontSize: "13px",
-  fontWeight: "bold",
+  background: "#111a29",
+  color: "#d7deea",
+  fontSize: "11px",
+  fontWeight: "700",
   cursor: "pointer",
 };
 
 const editButton: React.CSSProperties = {
-  padding: "9px 13px",
-  border: "none",
+  padding: "7px 10px",
+  border: "1px solid #d97706",
   borderRadius: "7px",
-  background: "#f59e0b",
+  background: "#9a5a05",
   color: "#fff",
-  fontSize: "13px",
-  fontWeight: "bold",
+  fontSize: "11px",
+  fontWeight: "700",
   cursor: "pointer",
 };
 
 const dangerButton: React.CSSProperties = {
-  padding: "9px 13px",
-  border: "none",
+  padding: "7px 10px",
+  border: "1px solid #ef4444",
   borderRadius: "7px",
-  background: "#dc2626",
+  background: "#991b1b",
   color: "#fff",
-  fontSize: "13px",
-  fontWeight: "bold",
+  fontSize: "11px",
+  fontWeight: "700",
   cursor: "pointer",
 };
 
 const logoutButton: React.CSSProperties = {
-  padding: "12px 18px",
-  border: "1px solid #ddd",
-  borderRadius: "8px",
-  background: "#fff",
-  color: "#dc2626",
-  fontSize: "14px",
-  fontWeight: "bold",
+  padding: "9px 12px",
+  border: "1px solid #3a2a32",
+  borderRadius: "7px",
+  background: "#17151c",
+  color: "#ff8b94",
+  fontSize: "11px",
+  fontWeight: "700",
   cursor: "pointer",
 };
 
 const statusButton: React.CSSProperties = {
-  padding: "8px 11px",
-  border: "1px solid #ddd",
+  padding: "7px 10px",
+  border: "1px solid #2b3952",
   borderRadius: "7px",
-  background: "#fff",
-  fontSize: "12px",
-  fontWeight: "600",
+  background: "#111a29",
+  color: "#b9c5d8",
+  fontSize: "10px",
+  fontWeight: "700",
   cursor: "pointer",
 };
 
 const closeButton: React.CSSProperties = {
-  border: "none",
-  background: "#eee",
-  width: "35px",
-  height: "35px",
-  borderRadius: "50%",
+  border: "1px solid #334155",
+  background: "#172033",
+  color: "#cbd5e1",
+  width: "31px",
+  height: "31px",
+  borderRadius: "8px",
   cursor: "pointer",
-  fontSize: "16px",
+  fontSize: "14px",
 };
 
 const overlayStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.55)",
+  background: "rgba(2,6,15,.78)",
+  backdropFilter: "blur(5px)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  padding: "20px",
+  padding: "16px",
   zIndex: 9999,
 };
 
@@ -1890,21 +1923,28 @@ const modalStyle: React.CSSProperties = {
   maxWidth: "1000px",
   maxHeight: "90vh",
   overflowY: "auto",
-  background: "#fff",
-  borderRadius: "14px",
-  padding: "25px",
+  background: "#0f1725",
+  color: "#e5e7eb",
+  border: "1px solid #2b3952",
+  borderRadius: "12px",
+  padding: "18px",
   boxSizing: "border-box",
+  boxShadow: "0 24px 70px rgba(0,0,0,.45)",
 };
 
 const thStyle: React.CSSProperties = {
   textAlign: "left",
-  padding: "12px",
-  borderBottom: "1px solid #ddd",
-  fontSize: "13px",
+  padding: "9px",
+  borderBottom: "1px solid #26334a",
+  color: "#94a3b8",
+  fontSize: "10px",
+  textTransform: "uppercase",
+  letterSpacing: ".04em",
 };
 
 const tdStyle: React.CSSProperties = {
-  padding: "12px",
-  borderBottom: "1px solid #eee",
-  fontSize: "13px",
+  padding: "9px",
+  borderBottom: "1px solid #1d293b",
+  color: "#cbd5e1",
+  fontSize: "11px",
 };
