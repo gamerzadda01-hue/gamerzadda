@@ -27,7 +27,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const sessionToken = decodeURIComponent(sessionMatch[1]);
+    const sessionToken = decodeURIComponent(
+      sessionMatch[1]
+    );
 
     const tokenHash = crypto
       .createHash("sha256")
@@ -42,7 +44,10 @@ export async function POST(request: Request) {
         .maybeSingle();
 
     if (sessionError) {
-      console.error("Session lookup error:", sessionError);
+      console.error(
+        "Session lookup error:",
+        sessionError
+      );
 
       return NextResponse.json(
         {
@@ -79,6 +84,60 @@ export async function POST(request: Request) {
     const userId = session.user_id;
 
     // ==========================================
+    // GET USER DETAILS
+    // ==========================================
+
+    const { data: user, error: userError } =
+      await supabaseAdmin
+        .from("users")
+        .select("full_name, phone")
+        .eq("id", userId)
+        .maybeSingle();
+
+    if (userError) {
+      console.error(
+        "User lookup error:",
+        userError
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Unable to load user details",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "User not found",
+        },
+        { status: 404 }
+      );
+    }
+
+    const customerName =
+      String(user.full_name || "").trim() ||
+      "GamerzAdda User";
+
+    const customerMobile =
+      String(user.phone || "").replace(/\D/g, "");
+
+    if (!/^\d{10}$/.test(customerMobile)) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Please add a valid 10-digit mobile number to your profile before making a deposit",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ==========================================
     // READ REQUEST
     // ==========================================
 
@@ -111,14 +170,16 @@ export async function POST(request: Request) {
     // LOAD ADMIN WALLET SETTINGS
     // ==========================================
 
-    const { data: settings, error: settingsError } =
-      await supabaseAdmin
-        .from("app_settings")
-        .select("key, value")
-        .in("key", [
-          "min_deposit_amount",
-          "deposit_bonus_percent",
-        ]);
+    const {
+      data: settings,
+      error: settingsError,
+    } = await supabaseAdmin
+      .from("app_settings")
+      .select("key, value")
+      .in("key", [
+        "min_deposit_amount",
+        "deposit_bonus_percent",
+      ]);
 
     if (settingsError) {
       console.error(
@@ -129,7 +190,8 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Unable to load deposit settings",
+          message:
+            "Unable to load deposit settings",
         },
         { status: 500 }
       );
@@ -139,15 +201,24 @@ export async function POST(request: Request) {
     let bonusPercent = 10;
 
     for (const setting of settings || []) {
-      if (setting.key === "min_deposit_amount") {
+      if (
+        setting.key ===
+        "min_deposit_amount"
+      ) {
         const value = Number(setting.value);
 
-        if (Number.isFinite(value) && value > 0) {
+        if (
+          Number.isFinite(value) &&
+          value > 0
+        ) {
           minDeposit = value;
         }
       }
 
-      if (setting.key === "deposit_bonus_percent") {
+      if (
+        setting.key ===
+        "deposit_bonus_percent"
+      ) {
         const value = Number(setting.value);
 
         if (
@@ -189,7 +260,9 @@ export async function POST(request: Request) {
     // ==========================================
 
     if (!process.env.PAY0_API_KEY) {
-      console.error("PAY0_API_KEY missing");
+      console.error(
+        "PAY0_API_KEY missing"
+      );
 
       return NextResponse.json(
         {
@@ -208,7 +281,9 @@ export async function POST(request: Request) {
     const appUrl = process.env.APP_URL;
 
     if (!appUrl) {
-      console.error("APP_URL missing");
+      console.error(
+        "APP_URL missing"
+      );
 
       return NextResponse.json(
         {
@@ -234,19 +309,21 @@ export async function POST(request: Request) {
     // SAVE PENDING DEPOSIT ORDER
     // ==========================================
 
-    const { data: depositOrder, error: orderError } =
-      await supabaseAdmin
-        .from("deposit_orders")
-        .insert({
-          user_id: userId,
-          order_id: orderId,
-          amount: amount,
-          status: "PENDING",
-          bonus_percent: bonusPercent,
-          bonus_amount: bonusAmount,
-        })
-        .select("id, order_id")
-        .single();
+    const {
+      data: depositOrder,
+      error: orderError,
+    } = await supabaseAdmin
+      .from("deposit_orders")
+      .insert({
+        user_id: userId,
+        order_id: orderId,
+        amount: amount,
+        status: "PENDING",
+        bonus_percent: bonusPercent,
+        bonus_amount: bonusAmount,
+      })
+      .select("id, order_id")
+      .single();
 
     if (orderError || !depositOrder) {
       console.error(
@@ -257,7 +334,8 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Unable to create deposit order",
+          message:
+            "Unable to create deposit order",
         },
         { status: 500 }
       );
@@ -267,7 +345,18 @@ export async function POST(request: Request) {
     // CREATE PAY0 ORDER
     // ==========================================
 
-    const pay0Data = new URLSearchParams();
+    const pay0Data =
+      new URLSearchParams();
+
+    pay0Data.append(
+      "customer_mobile",
+      customerMobile
+    );
+
+    pay0Data.append(
+      "customer_name",
+      customerName
+    );
 
     pay0Data.append(
       "user_token",
@@ -299,25 +388,29 @@ export async function POST(request: Request) {
       "GamerzAdda Deposit"
     );
 
-    const pay0Response = await fetch(
-      PAY0_CREATE_ORDER_URL,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            "application/x-www-form-urlencoded",
-        },
-        body: pay0Data.toString(),
-        cache: "no-store",
-      }
-    );
+    const pay0Response =
+      await fetch(
+        PAY0_CREATE_ORDER_URL,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+          body:
+            pay0Data.toString(),
+          cache: "no-store",
+        }
+      );
 
-    const pay0Text = await pay0Response.text();
+    const pay0Text =
+      await pay0Response.text();
 
     let pay0Result: any = null;
 
     try {
-      pay0Result = JSON.parse(pay0Text);
+      pay0Result =
+        JSON.parse(pay0Text);
     } catch {
       console.error(
         "Pay0 returned non-JSON response:",
@@ -335,7 +428,15 @@ export async function POST(request: Request) {
     // PAY0 ERROR
     // ==========================================
 
-    if (!pay0Response.ok || !pay0Result) {
+    if (
+      !pay0Response.ok ||
+      !pay0Result?.status
+    ) {
+      console.error(
+        "Pay0 create order failed:",
+        pay0Result
+      );
+
       await supabaseAdmin
         .from("deposit_orders")
         .update({
@@ -346,7 +447,9 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Payment gateway error",
+          message:
+            pay0Result?.message ||
+            "Payment gateway error",
         },
         { status: 502 }
       );
@@ -358,8 +461,8 @@ export async function POST(request: Request) {
 
     const paymentUrl =
       pay0Result?.result?.payment_url ||
-      pay0Result?.result?.paymentUrl ||
       pay0Result?.payment_url ||
+      pay0Result?.result?.paymentUrl ||
       pay0Result?.paymentUrl ||
       pay0Result?.url ||
       null;
