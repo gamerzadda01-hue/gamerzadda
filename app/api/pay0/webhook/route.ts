@@ -6,50 +6,104 @@ const PAY0_STATUS_URL =
 
 export async function POST(request: Request) {
   try {
+    // ==========================================
+    // READ PAY0 WEBHOOK
+    // ==========================================
+
     const formData = await request.formData();
 
-    const status = String(formData.get("status") || "");
-    const orderId = String(formData.get("order_id") || "");
-    const amount = Number(formData.get("amount") || 0);
+    const orderId = String(
+      formData.get("order_id") || ""
+    );
 
     if (!orderId) {
-      return new NextResponse("Missing order_id", { status: 400 });
+      return new NextResponse(
+        "Missing order_id",
+        { status: 400 }
+      );
     }
 
-    // Find our deposit order
+    // ==========================================
+    // FIND ORDER
+    // ==========================================
+
     const { data: order, error: orderError } =
       await supabaseAdmin
         .from("deposit_orders")
-        .select("id, user_id, order_id, amount, status")
+        .select(
+          `
+          id,
+          user_id,
+          order_id,
+          amount,
+          status,
+          bonus_percent,
+          bonus_amount,
+          processed_at
+          `
+        )
         .eq("order_id", orderId)
         .maybeSingle();
 
     if (orderError) {
-      console.error("Deposit order lookup error:", orderError);
-      return new NextResponse("Database error", { status: 500 });
+      console.error(
+        "Deposit order lookup error:",
+        orderError
+      );
+
+      return new NextResponse(
+        "Database error",
+        { status: 500 }
+      );
     }
 
     if (!order) {
-      console.error("Unknown Pay0 order:", orderId);
-      return new NextResponse("Order not found", { status: 404 });
+      console.error(
+        "Unknown Pay0 order:",
+        orderId
+      );
+
+      return new NextResponse(
+        "Order not found",
+        { status: 404 }
+      );
     }
 
-    // Already credited — prevent duplicate webhook credit
-    if (order.status === "SUCCESS") {
-      return new NextResponse("Already processed", {
-        status: 200,
-      });
+    // ==========================================
+    // ALREADY PROCESSED
+    // ==========================================
+
+    if (
+      order.status === "SUCCESS" ||
+      order.processed_at
+    ) {
+      return new NextResponse(
+        "Already processed",
+        { status: 200 }
+      );
     }
 
-    // Verify payment directly with Pay0
+    // ==========================================
+    // PAY0 API KEY
+    // ==========================================
+
     if (!process.env.PAY0_API_KEY) {
-      console.error("PAY0_API_KEY missing");
-      return new NextResponse("Server configuration error", {
-        status: 500,
-      });
+      console.error(
+        "PAY0_API_KEY missing"
+      );
+
+      return new NextResponse(
+        "Server configuration error",
+        { status: 500 }
+      );
     }
 
-    const verifyData = new URLSearchParams();
+    // ==========================================
+    // VERIFY PAYMENT WITH PAY0
+    // ==========================================
+
+    const verifyData =
+      new URLSearchParams();
 
     verifyData.append(
       "user_token",
@@ -61,17 +115,23 @@ export async function POST(request: Request) {
       orderId
     );
 
-    const verifyResponse = await fetch(PAY0_STATUS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type":
-          "application/x-www-form-urlencoded",
-      },
-      body: verifyData.toString(),
-      cache: "no-store",
-    });
+    const verifyResponse =
+      await fetch(
+        PAY0_STATUS_URL,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+          body:
+            verifyData.toString(),
+          cache: "no-store",
+        }
+      );
 
-    const verifyResult = await verifyResponse.json();
+    const verifyResult =
+      await verifyResponse.json();
 
     console.log(
       "Pay0 verification:",
@@ -79,14 +139,19 @@ export async function POST(request: Request) {
       verifyResult
     );
 
+    // ==========================================
+    // VERIFY RESPONSE
+    // ==========================================
+
     if (
       !verifyResponse.ok ||
       !verifyResult?.status ||
       !verifyResult?.result
     ) {
-      return new NextResponse("Payment verification failed", {
-        status: 400,
-      });
+      return new NextResponse(
+        "Payment verification failed",
+        { status: 400 }
+      );
     }
 
     const txnStatus = String(
@@ -97,29 +162,44 @@ export async function POST(request: Request) {
       verifyResult.result.amount || 0
     );
 
-    // Payment is not successful yet
+    // ==========================================
+    // PAYMENT NOT SUCCESSFUL
+    // ==========================================
+
     if (txnStatus !== "SUCCESS") {
       await supabaseAdmin
         .from("deposit_orders")
         .update({
-          status: txnStatus || "PENDING",
+          status:
+            txnStatus || "PENDING",
         })
-        .eq("order_id", orderId);
+        .eq("order_id", orderId)
+        .neq("status", "SUCCESS");
 
-      return new NextResponse("Payment pending", {
-        status: 200,
-      });
+      return new NextResponse(
+        "Payment pending",
+        { status: 200 }
+      );
     }
 
-    // Amount must match our order
+    // ==========================================
+    // VERIFY AMOUNT
+    // ==========================================
+
+    const orderAmount =
+      Number(order.amount);
+
     if (
       !Number.isFinite(paidAmount) ||
-      paidAmount !== Number(order.amount)
+      paidAmount !== orderAmount
     ) {
       console.error(
         "Amount mismatch:",
-        order.amount,
-        paidAmount
+        {
+          orderId,
+          orderAmount,
+          paidAmount,
+        }
       );
 
       await supabaseAdmin
@@ -127,98 +207,65 @@ export async function POST(request: Request) {
         .update({
           status: "FAILED",
         })
-        .eq("order_id", orderId);
-
-      return new NextResponse("Amount mismatch", {
-        status: 400,
-      });
-    }
-
-    // Update deposit order
-    const { error: updateError } =
-      await supabaseAdmin
-        .from("deposit_orders")
-        .update({
-          status: "SUCCESS",
-          utr: verifyResult.result.utr || null,
-          paid_at: new Date().toISOString(),
-        })
         .eq("order_id", orderId)
         .neq("status", "SUCCESS");
 
-    if (updateError) {
-      console.error(
-        "Deposit order update error:",
-        updateError
+      return new NextResponse(
+        "Amount mismatch",
+        { status: 400 }
       );
-
-      return new NextResponse("Database error", {
-        status: 500,
-      });
     }
 
-    // Credit wallet
-    const { data: wallet, error: walletError } =
-      await supabaseAdmin
-        .from("wallet_balances")
-        .select("deposit_balance")
-        .eq("user_id", order.user_id)
-        .maybeSingle();
+    // ==========================================
+    // ATOMIC WALLET CREDIT
+    // ==========================================
 
-    if (walletError || !wallet) {
-      console.error(
-        "Wallet lookup error:",
-        walletError
+    const { data: result, error: processError } =
+      await supabaseAdmin.rpc(
+        "process_successful_deposit",
+        {
+          p_order_id: orderId,
+          p_utr:
+            verifyResult.result.utr ||
+            null,
+        }
       );
 
-      return new NextResponse("Wallet not found", {
-        status: 500,
-      });
-    }
-
-    const newDepositBalance =
-      Number(wallet.deposit_balance || 0) +
-      Number(order.amount);
-
-    const { error: balanceError } =
-      await supabaseAdmin
-        .from("wallet_balances")
-        .update({
-          deposit_balance: newDepositBalance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", order.user_id);
-
-    if (balanceError) {
+    if (processError) {
       console.error(
-        "Wallet credit error:",
-        balanceError
+        "Deposit processing error:",
+        processError
       );
 
-      return new NextResponse("Wallet credit failed", {
-        status: 500,
-      });
+      return new NextResponse(
+        "Wallet processing failed",
+        { status: 500 }
+      );
     }
 
-    // Create wallet transaction
-    await supabaseAdmin
-      .from("wallet_transactions")
-      .insert({
-        user_id: order.user_id,
-        amount: Number(order.amount),
-        type: "deposit",
-        description: "Wallet deposit",
-        reference_id: order.id,
-      });
+    console.log(
+      "Deposit processed:",
+      orderId,
+      result
+    );
 
-    return new NextResponse("Payment credited successfully", {
-      status: 200,
-    });
+    // ==========================================
+    // SUCCESS
+    // ==========================================
+
+    return new NextResponse(
+      "Payment credited successfully",
+      { status: 200 }
+    );
   } catch (error) {
-    console.error("Pay0 webhook error:", error);
+    console.error(
+      "Pay0 webhook error:",
+      error
+    );
 
-    return new NextResponse("Webhook error", {
-      status: 500,
-    });
+    return new NextResponse(
+      "Webhook error",
+      { status: 500 }
+    );
   }
 }

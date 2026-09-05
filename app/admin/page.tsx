@@ -38,6 +38,10 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const [minDeposit, setMinDeposit] = useState("10");
+  const [bonusPercent, setBonusPercent] = useState("10");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -97,6 +101,81 @@ export default function AdminPage() {
   }, [router]);
 
   // ==========================================
+  // WALLET SETTINGS
+  // ==========================================
+
+  async function loadWalletSettings() {
+    const { data, error } = await supabase
+      .from("app_settings")
+      .select("key, value")
+      .in("key", [
+        "min_deposit_amount",
+        "deposit_bonus_percent",
+      ]);
+
+    if (error) {
+      console.error("Wallet settings load error:", error);
+      alert("Wallet settings loading failed: " + error.message);
+      return;
+    }
+
+    for (const setting of data || []) {
+      if (setting.key === "min_deposit_amount") {
+        setMinDeposit(String(setting.value));
+      }
+
+      if (setting.key === "deposit_bonus_percent") {
+        setBonusPercent(String(setting.value));
+      }
+    }
+  }
+
+  async function saveWalletSettings() {
+    const min = Number(minDeposit);
+    const bonus = Number(bonusPercent);
+
+    if (!Number.isFinite(min) || min <= 0) {
+      alert("Minimum deposit must be greater than 0.");
+      return;
+    }
+
+    if (!Number.isFinite(bonus) || bonus < 0 || bonus > 100) {
+      alert("Bonus percentage must be between 0% and 100%.");
+      return;
+    }
+
+    setSettingsSaving(true);
+
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert(
+        [
+          {
+            key: "min_deposit_amount",
+            value: min,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            key: "deposit_bonus_percent",
+            value: bonus,
+            updated_at: new Date().toISOString(),
+          },
+        ],
+        { onConflict: "key" }
+      );
+
+    if (error) {
+      console.error("Wallet settings save error:", error);
+      alert("Settings save failed: " + error.message);
+      setSettingsSaving(false);
+      return;
+    }
+
+    alert("Wallet settings updated successfully ✅");
+    setSettingsSaving(false);
+  }
+
+  // ==========================================
   // LOAD TOURNAMENTS
   // ==========================================
 
@@ -123,6 +202,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (!checkingAdmin) {
       loadTournaments();
+      loadWalletSettings();
     }
   }, [checkingAdmin]);
 
@@ -604,6 +684,92 @@ export default function AdminPage() {
               🚪 Logout
             </button>
           </div>
+        </div>
+
+        {/* WALLET SETTINGS */}
+
+        <div style={cardStyle}>
+          <h2 style={{ marginTop: 0 }}>💰 Wallet Settings</h2>
+
+          <p
+            style={{
+              color: "#666",
+              marginTop: "-5px",
+              marginBottom: "20px",
+            }}
+          >
+            Control minimum deposit amount and deposit bonus.
+          </p>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit,minmax(220px,1fr))",
+              gap: "15px",
+            }}
+          >
+            <label>
+              Minimum Deposit ₹
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                value={minDeposit}
+                onChange={(e) => setMinDeposit(e.target.value)}
+                style={inputStyle}
+              />
+            </label>
+
+            <label>
+              Deposit Bonus %
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={bonusPercent}
+                onChange={(e) => setBonusPercent(e.target.value)}
+                style={inputStyle}
+              />
+            </label>
+          </div>
+
+          <div
+            style={{
+              marginTop: "18px",
+              padding: "15px",
+              background: "#f8f8f8",
+              borderRadius: "8px",
+              fontSize: "14px",
+            }}
+          >
+            <strong>Example:</strong>
+            <br />
+            User deposits ₹100
+            <br />
+            Deposit Balance: ₹100
+            <br />
+            Bonus Balance: ₹
+            {(100 * Number(bonusPercent || 0)) / 100}
+            <br />
+            Total Credit: ₹
+            {100 + (100 * Number(bonusPercent || 0)) / 100}
+          </div>
+
+          <button
+            onClick={saveWalletSettings}
+            disabled={settingsSaving}
+            style={{
+              ...primaryButton,
+              marginTop: "18px",
+              opacity: settingsSaving ? 0.6 : 1,
+            }}
+          >
+            {settingsSaving
+              ? "Saving Settings..."
+              : "💾 Save Wallet Settings"}
+          </button>
         </div>
 
         {/* CREATE / EDIT FORM */}

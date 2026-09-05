@@ -1,215 +1,464 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
-import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-const SESSION_COOKIE = "gamerzadda_session";
-const PAY0_API_URL = "https://pay0.shop/api/create-order";
-
-async function getUserId() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-
-  if (!token) return null;
-
-  const tokenHash = crypto
-    .createHash("sha256")
-    .update(token)
-    .digest("hex");
-
-  const { data: session } = await supabaseAdmin
-    .from("user_sessions")
-    .select("user_id, expires_at")
-    .eq("token_hash", tokenHash)
-    .maybeSingle();
-
-  if (!session) return null;
-
-  if (new Date(session.expires_at) <= new Date()) {
-    await supabaseAdmin
-      .from("user_sessions")
-      .delete()
-      .eq("token_hash", tokenHash);
-
-    return null;
-  }
-
-  return session.user_id;
-}
+const PAY0_STATUS_URL =
+  "https://pay0.shop/api/check-order-status";
 
 export async function POST(request: Request) {
   try {
-    const userId = await getUserId();
+    // ==========================================
+    // READ PAY0 WEBHOOK DATA
+    // ==========================================
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized." },
-        { status: 401 }
-      );
-    }
+    const formData = await request.formData();
 
-    const body = await request.json();
-    const amount = Number(body?.amount);
+    const orderId = String(
+      formData.get("order_id") || ""
+    );
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return NextResponse.json(
-        { error: "Enter a valid amount." },
+    if (!orderId) {
+      return new NextResponse(
+        "Missing order_id",
         { status: 400 }
       );
     }
 
-    if (amount < 10) {
-      return NextResponse.json(
-        { error: "Minimum deposit amount is ₹10." },
-        { status: 400 }
+    // ==========================================
+    // FIND DEPOSIT ORDER
+    // ==========================================
+
+    const {
+      data: order,
+      error: orderError,
+    } = await supabaseAdmin
+      .from("deposit_orders")
+      .select(
+        `
+        id,
+        user_id,
+        order_id,
+        amount,
+        status,
+        bonus_percent,
+        bonus_amount
+        `
+      )
+      .eq("order_id", orderId)
+      .maybeSingle();
+
+    if (orderError) {
+      console.error(
+        "Deposit order lookup error:",
+        orderError
       );
-    }
 
-    if (Math.round(amount * 100) !== amount * 100) {
-      return NextResponse.json(
-        { error: "Amount can have maximum 2 decimal places." },
-        { status: 400 }
-      );
-    }
-
-    if (!process.env.PAY0_API_KEY) {
-      console.error("PAY0_API_KEY is missing.");
-
-      return NextResponse.json(
-        { error: "Payment gateway is not configured." },
+      return new NextResponse(
+        "Database error",
         { status: 500 }
       );
     }
 
-    // Get user information
-    const { data: user, error: userError } = await supabaseAdmin
-      .from("users")
-      .select("id, full_name, phone")
-      .eq("id", userId)
-      .maybeSingle();
+    if (!order) {
+      console.error(
+        "Unknown Pay0 order:",
+        orderId
+      );
 
-    if (userError || !user) {
-      return NextResponse.json(
-        { error: "User not found." },
+      return new NextResponse(
+        "Order not found",
         { status: 404 }
       );
     }
 
-    // Generate unique order ID
-    const orderId = `GA${Date.now()}${crypto
-      .randomBytes(4)
-      .toString("hex")
-      .toUpperCase()}`;
+    // ==========================================
+    // ALREADY SUCCESSFUL
+    // ==========================================
 
-    // Save order as pending BEFORE payment
-    const { error: insertError } = await supabaseAdmin
-      .from("deposit_orders")
-      .insert({
-        user_id: userId,
-        order_id: orderId,
-        amount: amount,
-        status: "PENDING",
-      });
+    if (order.status === "SUCCESS") {
+      return new NextResponse(
+        "Already processed",
+        { status: 200 }
+      );
+    }
 
-    if (insertError) {
-      console.error("Deposit order insert error:", insertError);
+    // ==========================================
+    // PAY0 API KEY CHECK
+    // ==========================================
 
-      return NextResponse.json(
-        { error: "Unable to create deposit order." },
+    if (!process.env.PAY0_API_KEY) {
+      console.error(
+        "PAY0_API_KEY missing"
+      );
+
+      return new NextResponse(
+        "Server configuration error",
         { status: 500 }
       );
     }
 
-    // Pay0 expects form-urlencoded data
-    const formData = new URLSearchParams();
+    // ==========================================
+    // VERIFY PAYMENT DIRECTLY WITH PAY0
+    // ==========================================
 
-    formData.append(
-      "customer_mobile",
-      String(user.phone || "")
-    );
+    const verifyData =
+      new URLSearchParams();
 
-    formData.append(
-      "customer_name",
-      String(user.full_name || "GamerzAdda User")
-    );
-
-    formData.append(
+    verifyData.append(
       "user_token",
       process.env.PAY0_API_KEY
     );
 
-    formData.append(
-      "amount",
-      amount.toFixed(2)
-    );
-
-    formData.append(
+    verifyData.append(
       "order_id",
       orderId
     );
 
-    // After payment, return the user to the GamerzAdda wallet page.
-    formData.append(
-      "redirect_url",
-      `${process.env.NEXT_PUBLIC_APP_URL}/wallet`
+    const verifyResponse =
+      await fetch(
+        PAY0_STATUS_URL,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+          body:
+            verifyData.toString(),
+          cache: "no-store",
+        }
+      );
+
+    const verifyResult =
+      await verifyResponse.json();
+
+    console.log(
+      "Pay0 verification:",
+      orderId,
+      verifyResult
     );
 
-    formData.append(
-      "remark1",
-      userId
-    );
-
-    formData.append(
-      "remark2",
-      "GamerzAdda Deposit"
-    );
-
-    const pay0Response = await fetch(PAY0_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type":
-          "application/x-www-form-urlencoded",
-      },
-      body: formData.toString(),
-      cache: "no-store",
-    });
-
-    const pay0Data = await pay0Response.json();
-
-    console.log("Pay0 response:", pay0Data);
+    // ==========================================
+    // VERIFY RESPONSE
+    // ==========================================
 
     if (
-      !pay0Response.ok ||
-      !pay0Data?.status ||
-      !pay0Data?.result?.payment_url
+      !verifyResponse.ok ||
+      !verifyResult?.status ||
+      !verifyResult?.result
     ) {
+      return new NextResponse(
+        "Payment verification failed",
+        { status: 400 }
+      );
+    }
+
+    // ==========================================
+    // PAYMENT STATUS
+    // ==========================================
+
+    const txnStatus = String(
+      verifyResult.result.txnStatus || ""
+    ).toUpperCase();
+
+    const paidAmount = Number(
+      verifyResult.result.amount || 0
+    );
+
+    // ==========================================
+    // PAYMENT NOT SUCCESSFUL
+    // ==========================================
+
+    if (txnStatus !== "SUCCESS") {
+      await supabaseAdmin
+        .from("deposit_orders")
+        .update({
+          status:
+            txnStatus || "PENDING",
+        })
+        .eq("order_id", orderId)
+        .neq("status", "SUCCESS");
+
+      return new NextResponse(
+        "Payment pending",
+        { status: 200 }
+      );
+    }
+
+    // ==========================================
+    // VERIFY PAID AMOUNT
+    // ==========================================
+
+    const orderAmount =
+      Number(order.amount);
+
+    if (
+      !Number.isFinite(paidAmount) ||
+      paidAmount !== orderAmount
+    ) {
+      console.error(
+        "Amount mismatch:",
+        {
+          orderId,
+          orderAmount,
+          paidAmount,
+        }
+      );
+
       await supabaseAdmin
         .from("deposit_orders")
         .update({
           status: "FAILED",
         })
-        .eq("order_id", orderId);
+        .eq("order_id", orderId)
+        .neq("status", "SUCCESS");
 
-      return NextResponse.json(
-        {
-          error:
-            pay0Data?.message ||
-            "Unable to create payment.",
-        },
+      return new NextResponse(
+        "Amount mismatch",
         { status: 400 }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      orderId,
-      paymentUrl: pay0Data.result.payment_url,
-    });
-  } catch (error) {
-    console.error("Create deposit error:", error);
+    // ==========================================
+    // GET SAVED BONUS
+    // ==========================================
 
-    return NextResponse.json(
-      { error: "Something went wrong." },
+    const bonusPercent =
+      Number(
+        order.bonus_percent || 0
+      );
+
+    const savedBonusAmount =
+      Number(
+        order.bonus_amount || 0
+      );
+
+    const bonusAmount =
+      Number.isFinite(savedBonusAmount) &&
+      savedBonusAmount >= 0
+        ? savedBonusAmount
+        : 0;
+
+    // ==========================================
+    // GET WALLET
+    // ==========================================
+
+    const {
+      data: wallet,
+      error: walletError,
+    } = await supabaseAdmin
+      .from("wallet_balances")
+      .select(
+        "deposit_balance, bonus_balance"
+      )
+      .eq("user_id", order.user_id)
+      .maybeSingle();
+
+    if (walletError) {
+      console.error(
+        "Wallet lookup error:",
+        walletError
+      );
+
+      return new NextResponse(
+        "Wallet lookup failed",
+        { status: 500 }
+      );
+    }
+
+    if (!wallet) {
+      console.error(
+        "Wallet not found:",
+        order.user_id
+      );
+
+      return new NextResponse(
+        "Wallet not found",
+        { status: 500 }
+      );
+    }
+
+    // ==========================================
+    // CALCULATE NEW BALANCES
+    // ==========================================
+
+    const currentDepositBalance =
+      Number(
+        wallet.deposit_balance || 0
+      );
+
+    const currentBonusBalance =
+      Number(
+        wallet.bonus_balance || 0
+      );
+
+    const newDepositBalance =
+      Math.round(
+        (currentDepositBalance +
+          orderAmount) *
+          100
+      ) / 100;
+
+    const newBonusBalance =
+      Math.round(
+        (currentBonusBalance +
+          bonusAmount) *
+          100
+      ) / 100;
+
+    // ==========================================
+    // CREDIT WALLET
+    // ==========================================
+
+    const {
+      error: balanceError,
+    } = await supabaseAdmin
+      .from("wallet_balances")
+      .update({
+        deposit_balance:
+          newDepositBalance,
+
+        bonus_balance:
+          newBonusBalance,
+
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq(
+        "user_id",
+        order.user_id
+      );
+
+    if (balanceError) {
+      console.error(
+        "Wallet credit error:",
+        balanceError
+      );
+
+      return new NextResponse(
+        "Wallet credit failed",
+        { status: 500 }
+      );
+    }
+
+    // ==========================================
+    // SAVE DEPOSIT TRANSACTION
+    // ==========================================
+
+    const {
+      error: depositTransactionError,
+    } = await supabaseAdmin
+      .from("wallet_transactions")
+      .insert({
+        user_id: order.user_id,
+        amount: orderAmount,
+        type: "deposit",
+        description:
+          "Wallet deposit",
+        reference_id: order.id,
+      });
+
+    if (depositTransactionError) {
+      console.error(
+        "Deposit transaction error:",
+        depositTransactionError
+      );
+    }
+
+    // ==========================================
+    // SAVE BONUS TRANSACTION
+    // ==========================================
+
+    if (bonusAmount > 0) {
+      const {
+        error: bonusTransactionError,
+      } = await supabaseAdmin
+        .from("wallet_transactions")
+        .insert({
+          user_id: order.user_id,
+          amount: bonusAmount,
+          type: "bonus",
+          description:
+            `Deposit bonus (${bonusPercent}%)`,
+          reference_id: order.id,
+        });
+
+      if (bonusTransactionError) {
+        console.error(
+          "Bonus transaction error:",
+          bonusTransactionError
+        );
+      }
+    }
+
+    // ==========================================
+    // MARK ORDER SUCCESS
+    // ==========================================
+
+    const {
+      error: updateError,
+    } = await supabaseAdmin
+      .from("deposit_orders")
+      .update({
+        status: "SUCCESS",
+
+        utr:
+          verifyResult.result.utr ||
+          null,
+
+        paid_at:
+          new Date().toISOString(),
+      })
+      .eq(
+        "order_id",
+        orderId
+      )
+      .neq(
+        "status",
+        "SUCCESS"
+      );
+
+    if (updateError) {
+      console.error(
+        "Deposit order update error:",
+        updateError
+      );
+
+      return new NextResponse(
+        "Database error",
+        { status: 500 }
+      );
+    }
+
+    // ==========================================
+    // SUCCESS
+    // ==========================================
+
+    console.log(
+      "Deposit credited successfully:",
+      {
+        orderId,
+        userId: order.user_id,
+        deposit: orderAmount,
+        bonusPercent,
+        bonus: bonusAmount,
+        total:
+          orderAmount +
+          bonusAmount,
+      }
+    );
+
+    return new NextResponse(
+      "Payment credited successfully",
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error(
+      "Pay0 webhook error:",
+      error
+    );
+
+    return new NextResponse(
+      "Webhook error",
       { status: 500 }
     );
   }
