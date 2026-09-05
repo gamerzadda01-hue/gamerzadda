@@ -59,7 +59,17 @@ export default function WithdrawPage() {
         }
       );
 
-      setTodayWithdrawals(Number(data.todayWithdrawals || 0));
+      const withdrawalInfoResponse = await fetch("/api/wallet/withdraw", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (withdrawalInfoResponse.ok) {
+        const withdrawalInfo = await withdrawalInfoResponse.json();
+        setTodayWithdrawals(Number(withdrawalInfo.todayWithdrawals || 0));
+      } else {
+        setTodayWithdrawals(0);
+      }
     } catch {
       setError("Unable to load wallet.");
     } finally {
@@ -141,10 +151,29 @@ export default function WithdrawPage() {
         }),
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+
+      let data: any = {};
+
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        console.error(
+          "Withdrawal API raw response:",
+          responseText
+        );
+
+        setError(
+          `Withdrawal server response error (${response.status}).`
+        );
+        return;
+      }
 
       if (!response.ok) {
-        setError(data.error || "Withdrawal request failed.");
+        setError(
+          data?.error ||
+            `Withdrawal request failed (${response.status}).`
+        );
         return;
       }
 
@@ -356,7 +385,7 @@ export default function WithdrawPage() {
 
             <div className="mt-4 rounded-xl bg-[#edfaef] px-4 py-3">
               <p className="text-sm font-bold text-[#25803c]">
-                Your amount will be credited within 30 minutes.
+                Your amount will be credited to your bank/UPI account within 30 minutes.
               </p>
             </div>
 
