@@ -16,6 +16,8 @@ type Member = {
   status: string | null;
   wallet_total: number;
   last_wallet_activity: string | null;
+  referral_code: string | null;
+  referred_by: string | null;
 };
 
 type Wallet = {
@@ -39,6 +41,8 @@ export default function MembersPage() {
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustNote, setAdjustNote] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [memberDetail, setMemberDetail] = useState<any>(null);
+  const [referral, setReferral] = useState<any>(null);
 
   useEffect(() => {
     loadMembers();
@@ -91,6 +95,8 @@ export default function MembersPage() {
     setWallet(null);
     setHistory([]);
     setActionMessage("");
+    setMemberDetail(null);
+    setReferral(null);
     setWalletLoading(true);
 
     try {
@@ -127,6 +133,8 @@ export default function MembersPage() {
 
       setWallet(result.wallet || null);
       setHistory(result.history || []);
+      setMemberDetail(result.member || null);
+      setReferral(result.referral || null);
     } catch (err) {
       console.error(err);
       setWallet(null);
@@ -662,6 +670,146 @@ export default function MembersPage() {
           font-weight: 900;
         }
 
+        .profile-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px;
+          border: 1px solid #1d2a3b;
+          border-radius: 9px;
+          background: #0e1723;
+        }
+
+        .profile-avatar {
+          width: 58px;
+          height: 58px;
+          border-radius: 50%;
+          object-fit: cover;
+          border: 2px solid #263448;
+          background: #101925;
+          flex: 0 0 auto;
+        }
+
+        .profile-avatar-fallback {
+          width: 58px;
+          height: 58px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #182333;
+          color: #fff;
+          font-size: 20px;
+          font-weight: 900;
+          border: 2px solid #263448;
+          flex: 0 0 auto;
+        }
+
+        .profile-name {
+          color: #fff;
+          font-size: 13px;
+          font-weight: 900;
+        }
+
+        .profile-game {
+          margin-top: 3px;
+          color: #718096;
+          font-size: 9px;
+        }
+
+        .bio-box {
+          padding: 11px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
+          color: #b8c3d1;
+          font-size: 10px;
+          line-height: 1.55;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+
+        .ref-summary {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+
+        .ref-card {
+          padding: 11px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
+        }
+
+        .ref-label {
+          color: #647186;
+          font-size: 8px;
+          margin-bottom: 5px;
+        }
+
+        .ref-value {
+          color: #edf2f8;
+          font-size: 10px;
+          font-weight: 800;
+          word-break: break-word;
+        }
+
+        .referrer-card {
+          margin-top: 8px;
+          padding: 11px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
+        }
+
+        .referrer-title {
+          color: #647186;
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: .8px;
+          margin-bottom: 6px;
+        }
+
+        .referral-list {
+          display: flex;
+          flex-direction: column;
+          gap: 7px;
+          max-height: 250px;
+          overflow-y: auto;
+          margin-top: 8px;
+        }
+
+        .referral-item {
+          padding: 10px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
+        }
+
+        .referral-item-top {
+          display: flex;
+          justify-content: space-between;
+          gap: 8px;
+        }
+
+        .referral-item-name {
+          color: #fff;
+          font-size: 10px;
+          font-weight: 800;
+        }
+
+        .referral-item-date {
+          color: #65748a;
+          font-size: 8px;
+        }
+
+        .referral-item-meta {
+          margin-top: 4px;
+          color: #8290a3;
+          font-size: 8px;
+        }
+
         .edit-box {
           margin-top: 12px;
           padding: 12px;
@@ -1104,6 +1252,113 @@ export default function MembersPage() {
                     {formatDate(selectedMember.created_at)}
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <div className="section">
+              <div className="section-title">Profile</div>
+
+              <div className="profile-header">
+                {memberDetail?.avatar_url ? (
+                  <img
+                    className="profile-avatar"
+                    src={memberDetail.avatar_url}
+                    alt="Profile"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                      const fallback = e.currentTarget.parentElement?.querySelector(".profile-avatar-fallback") as HTMLElement | null;
+                      if (fallback) fallback.style.display = "flex";
+                    }}
+                  />
+                ) : null}
+                <div
+                  className={`profile-avatar-fallback ${memberDetail?.avatar_url ? "profile-avatar-hidden" : ""}`}
+                  style={memberDetail?.avatar_url ? { display: "none" } : undefined}
+                >
+                  {(selectedMember.full_name || selectedMember.game_name || "M").charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="profile-name">
+                    {selectedMember.full_name || selectedMember.game_name || "Member"}
+                  </div>
+                  <div className="profile-game">
+                    {selectedMember.game_name || "No game name"}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                <div className="info-label">Bio</div>
+                <div className="bio-box">
+                  {memberDetail?.bio || "No bio added."}
+                </div>
+              </div>
+            </div>
+
+            <div className="section">
+              <div className="section-title">Referral Information</div>
+
+              <div className="ref-summary">
+                <div className="ref-card">
+                  <div className="ref-label">My Referral Code</div>
+                  <div className="ref-value">
+                    {memberDetail?.referral_code || "—"}
+                  </div>
+                </div>
+                <div className="ref-card">
+                  <div className="ref-label">Total Referrals</div>
+                  <div className="ref-value">
+                    {Number(referral?.total_referrals || 0)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="referrer-card">
+                <div className="referrer-title">Referred By</div>
+                {referral?.referrer ? (
+                  <>
+                    <div className="ref-value">
+                      {referral.referrer.full_name || referral.referrer.game_name || "Member"}
+                    </div>
+                    <div className="referral-item-meta">
+                      Code: {referral.referrer.referral_code || "—"}
+                      {referral.referrer.phone ? ` · ${referral.referrer.phone}` : ""}
+                    </div>
+                  </>
+                ) : (
+                  <div className="ref-value">
+                    {memberDetail?.referred_by || "No referrer"}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <div className="referrer-title">Users Referred By This Member</div>
+                {!referral?.users?.length ? (
+                  <div className="no-history">No referrals yet.</div>
+                ) : (
+                  <div className="referral-list">
+                    {referral.users.map((user: any) => (
+                      <div className="referral-item" key={user.id}>
+                        <div className="referral-item-top">
+                          <span className="referral-item-name">
+                            {user.full_name || user.game_name || "Member"}
+                          </span>
+                          <span className="referral-item-date">
+                            {formatDate(user.created_at)}
+                          </span>
+                        </div>
+                        <div className="referral-item-meta">
+                          {user.game_name || "No game name"}
+                          {user.phone ? ` · ${user.phone}` : ""}
+                        </div>
+                        <div className="referral-item-meta">
+                          UID: {user.free_fire_uid || "—"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
