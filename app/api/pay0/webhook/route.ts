@@ -14,14 +14,17 @@ export async function POST(request: Request) {
 
     const orderId = String(
       formData.get("order_id") || ""
-    );
+    ).trim();
 
     if (!orderId) {
-      return new NextResponse(
-        "Missing order_id",
-        { status: 400 }
-      );
+      console.error("Pay0 webhook: Missing order_id");
+
+      return new NextResponse("Missing order_id", {
+        status: 400,
+      });
     }
+
+    console.log("Pay0 webhook received:", orderId);
 
     // ==========================================
     // FIND ORDER
@@ -51,10 +54,9 @@ export async function POST(request: Request) {
         orderError
       );
 
-      return new NextResponse(
-        "Database error",
-        { status: 500 }
-      );
+      return new NextResponse("Database error", {
+        status: 500,
+      });
     }
 
     if (!order) {
@@ -63,10 +65,9 @@ export async function POST(request: Request) {
         orderId
       );
 
-      return new NextResponse(
-        "Order not found",
-        { status: 404 }
-      );
+      return new NextResponse("Order not found", {
+        status: 404,
+      });
     }
 
     // ==========================================
@@ -77,17 +78,24 @@ export async function POST(request: Request) {
       order.status === "SUCCESS" ||
       order.processed_at
     ) {
-      return new NextResponse(
-        "Already processed",
-        { status: 200 }
+      console.log(
+        "Deposit already processed:",
+        orderId
       );
+
+      return new NextResponse("Already processed", {
+        status: 200,
+      });
     }
 
     // ==========================================
     // PAY0 API KEY
     // ==========================================
 
-    if (!process.env.PAY0_API_KEY) {
+    const pay0ApiKey =
+      process.env.PAY0_API_KEY;
+
+    if (!pay0ApiKey) {
       console.error(
         "PAY0_API_KEY missing"
       );
@@ -107,7 +115,7 @@ export async function POST(request: Request) {
 
     verifyData.append(
       "user_token",
-      process.env.PAY0_API_KEY
+      pay0ApiKey
     );
 
     verifyData.append(
@@ -123,6 +131,7 @@ export async function POST(request: Request) {
           headers: {
             "Content-Type":
               "application/x-www-form-urlencoded",
+            Accept: "application/json",
           },
           body:
             verifyData.toString(),
@@ -130,8 +139,35 @@ export async function POST(request: Request) {
         }
       );
 
-    const verifyResult =
-      await verifyResponse.json();
+    // ==========================================
+    // READ RESPONSE SAFELY
+    // ==========================================
+
+    const responseText =
+      await verifyResponse.text();
+
+    console.log(
+      "Pay0 verification HTTP status:",
+      verifyResponse.status
+    );
+
+    // Pay0/Cloudflare may return HTML instead of JSON
+    let verifyResult: any = null;
+
+    try {
+      verifyResult =
+        JSON.parse(responseText);
+    } catch {
+      console.error(
+        "Pay0 returned non-JSON response:",
+        responseText.slice(0, 1000)
+      );
+
+      return new NextResponse(
+        "Pay0 verification service unavailable",
+        { status: 502 }
+      );
+    }
 
     console.log(
       "Pay0 verification:",
@@ -148,19 +184,30 @@ export async function POST(request: Request) {
       !verifyResult?.status ||
       !verifyResult?.result
     ) {
+      console.error(
+        "Pay0 verification failed:",
+        verifyResult
+      );
+
       return new NextResponse(
         "Payment verification failed",
         { status: 400 }
       );
     }
 
-    const txnStatus = String(
-      verifyResult.result.txnStatus || ""
-    ).toUpperCase();
+    const txnStatus =
+      String(
+        verifyResult.result.txnStatus || ""
+      ).toUpperCase();
 
-    const paidAmount = Number(
-      verifyResult.result.amount || 0
-    );
+    const paidAmount =
+      Number(
+        verifyResult.result.amount || 0
+      );
+
+    const utr =
+      verifyResult.result.utr ||
+      null;
 
     // ==========================================
     // PAYMENT NOT SUCCESSFUL
@@ -175,6 +222,12 @@ export async function POST(request: Request) {
         })
         .eq("order_id", orderId)
         .neq("status", "SUCCESS");
+
+      console.log(
+        "Payment not successful:",
+        orderId,
+        txnStatus
+      );
 
       return new NextResponse(
         "Payment pending",
@@ -191,7 +244,8 @@ export async function POST(request: Request) {
 
     if (
       !Number.isFinite(paidAmount) ||
-      paidAmount !== orderAmount
+      Math.round(paidAmount * 100) !==
+        Math.round(orderAmount * 100)
     ) {
       console.error(
         "Amount mismatch:",
@@ -220,16 +274,16 @@ export async function POST(request: Request) {
     // ATOMIC WALLET CREDIT
     // ==========================================
 
-    const { data: result, error: processError } =
-      await supabaseAdmin.rpc(
-        "process_successful_deposit",
-        {
-          p_order_id: orderId,
-          p_utr:
-            verifyResult.result.utr ||
-            null,
-        }
-      );
+    const {
+      data: result,
+      error: processError,
+    } = await supabaseAdmin.rpc(
+      "process_successful_deposit",
+      {
+        p_order_id: orderId,
+        p_utr: utr,
+      }
+    );
 
     if (processError) {
       console.error(
@@ -244,7 +298,7 @@ export async function POST(request: Request) {
     }
 
     console.log(
-      "Deposit processed:",
+      "Deposit processed successfully:",
       orderId,
       result
     );
@@ -257,6 +311,7 @@ export async function POST(request: Request) {
       "Payment credited successfully",
       { status: 200 }
     );
+
   } catch (error) {
     console.error(
       "Pay0 webhook error:",
