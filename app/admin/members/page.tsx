@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 type Member = {
   id: string;
@@ -12,8 +12,8 @@ type Member = {
   role: string | null;
   created_at: string | null;
   ip_address: string | null;
-  game_name?: string | null;
-  status?: string | null;
+  game_name: string | null;
+  status: string | null;
 };
 
 type Wallet = {
@@ -23,8 +23,6 @@ type Wallet = {
 };
 
 export default function MembersPage() {
-  const supabase = createClient();
-
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -66,17 +64,17 @@ export default function MembersPage() {
         .from("users")
         .select(
           `
-            id,
-            full_name,
-            phone,
-            email,
-            free_fire_uid,
-            role,
-            created_at,
-            ip_address,
-            game_name,
-            status
-          `
+          id,
+          full_name,
+          phone,
+          email,
+          free_fire_uid,
+          role,
+          created_at,
+          ip_address,
+          game_name,
+          status
+        `
         )
         .order("created_at", { ascending: false });
 
@@ -86,6 +84,7 @@ export default function MembersPage() {
 
       setMembers((data || []) as Member[]);
     } catch (err: any) {
+      console.error(err);
       setError(err?.message || "Unable to load members.");
     } finally {
       setLoading(false);
@@ -102,10 +101,10 @@ export default function MembersPage() {
         .from("wallet_balances")
         .select(
           `
-            deposit_balance,
-            bonus_balance,
-            winning_balance
-          `
+          deposit_balance,
+          bonus_balance,
+          winning_balance
+        `
         )
         .eq("user_id", member.id)
         .maybeSingle();
@@ -115,6 +114,8 @@ export default function MembersPage() {
       }
 
       setWallet(data || null);
+    } catch (err) {
+      console.error(err);
     } finally {
       setWalletLoading(false);
     }
@@ -190,7 +191,6 @@ export default function MembersPage() {
           margin: 0;
           font-size: 22px;
           font-weight: 900;
-          letter-spacing: -0.4px;
         }
 
         .subtitle {
@@ -265,7 +265,7 @@ export default function MembersPage() {
 
         table {
           width: 100%;
-          min-width: 1250px;
+          min-width: 1350px;
           border-collapse: collapse;
         }
 
@@ -287,10 +287,6 @@ export default function MembersPage() {
           color: #c5cfdd;
           font-size: 10px;
           white-space: nowrap;
-        }
-
-        tr:last-child td {
-          border-bottom: 0;
         }
 
         tbody tr {
@@ -334,7 +330,6 @@ export default function MembersPage() {
 
         .role {
           display: inline-flex;
-          align-items: center;
           padding: 4px 7px;
           border-radius: 5px;
           font-size: 8px;
@@ -365,8 +360,8 @@ export default function MembersPage() {
           color: #ff526b;
         }
 
-        .empty,
         .loading,
+        .empty,
         .error {
           padding: 45px 20px;
           text-align: center;
@@ -383,7 +378,8 @@ export default function MembersPage() {
           inset: 0;
           z-index: 200;
           background: rgba(0, 0, 0, 0.65);
-          backdrop-filter: blur(3px);
+          border: 0;
+          padding: 0;
         }
 
         .drawer {
@@ -519,16 +515,16 @@ export default function MembersPage() {
             justify-content: space-between;
           }
 
-          .wallet-grid {
-            grid-template-columns: 1fr;
-          }
-
           .info-grid {
             grid-template-columns: 1fr;
           }
 
           .info.full {
             grid-column: auto;
+          }
+
+          .wallet-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>
@@ -537,7 +533,7 @@ export default function MembersPage() {
         <div>
           <h1 className="title">Member Database</h1>
           <p className="subtitle">
-            Manage and view all registered GamerzAdda members.
+            All registered GamerzAdda members
           </p>
         </div>
 
@@ -555,7 +551,8 @@ export default function MembersPage() {
       <div className="toolbar">
         <input
           className="search"
-          placeholder="Search by Member ID, Name, Phone, Email, Free Fire UID, Game Name, Role or IP..."
+          type="text"
+          placeholder="Search Member ID, Name, Phone, Email, UID, Role or IP..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -592,16 +589,24 @@ export default function MembersPage() {
 
             <tbody>
               {filteredMembers.map((member) => (
-                <tr key={member.id} onClick={() => openMember(member)}>
+                <tr
+                  key={member.id}
+                  onClick={() => openMember(member)}
+                >
                   <td>
-                    <span className="id" title={member.id}>
+                    <span
+                      className="id"
+                      title={member.id}
+                    >
                       {shortId(member.id)}
                     </span>
                   </td>
 
                   <td>
                     <span className="member-name">
-                      {member.full_name || member.game_name || "—"}
+                      {member.full_name ||
+                        member.game_name ||
+                        "—"}
                     </span>
                   </td>
 
@@ -626,7 +631,8 @@ export default function MembersPage() {
                   <td>
                     <span
                       className={`role ${
-                        String(member.role || "user").toLowerCase() === "admin"
+                        String(member.role || "user").toLowerCase() ===
+                        "admin"
                           ? "admin"
                           : "user"
                       }`}
@@ -646,8 +652,9 @@ export default function MembersPage() {
                   <td>
                     <span
                       className={`status ${
-                        String(member.status || "active").toLowerCase() ===
-                        "blocked"
+                        String(
+                          member.status || "active"
+                        ).toLowerCase() === "blocked"
                           ? "blocked"
                           : ""
                       }`}
@@ -680,7 +687,7 @@ export default function MembersPage() {
                 </h2>
 
                 <div className="drawer-subtitle">
-                  Member details & wallet information
+                  Member details & wallet
                 </div>
               </div>
 
@@ -693,12 +700,16 @@ export default function MembersPage() {
             </div>
 
             <div className="section">
-              <div className="section-title">Member Information</div>
+              <div className="section-title">
+                Member Information
+              </div>
 
               <div className="info-grid">
                 <div className="info full">
                   <div className="info-label">Member ID</div>
-                  <div className="info-value">{selectedMember.id}</div>
+                  <div className="info-value">
+                    {selectedMember.id}
+                  </div>
                 </div>
 
                 <div className="info">
@@ -753,7 +764,8 @@ export default function MembersPage() {
                 <div className="info">
                   <div className="info-label">IP Address</div>
                   <div className="info-value">
-                    {selectedMember.ip_address || "Not recorded"}
+                    {selectedMember.ip_address ||
+                      "Not recorded"}
                   </div>
                 </div>
 
@@ -767,30 +779,40 @@ export default function MembersPage() {
             </div>
 
             <div className="section">
-              <div className="section-title">Wallet Balance</div>
+              <div className="section-title">
+                Wallet Balance
+              </div>
 
               {walletLoading ? (
                 <div className="info">
-                  <div className="info-value">Loading wallet...</div>
+                  <div className="info-value">
+                    Loading wallet...
+                  </div>
                 </div>
               ) : (
                 <div className="wallet-grid">
                   <div className="wallet-card">
-                    <div className="wallet-label">Deposit</div>
+                    <div className="wallet-label">
+                      Deposit
+                    </div>
                     <div className="wallet-value">
                       {money(wallet?.deposit_balance)}
                     </div>
                   </div>
 
                   <div className="wallet-card">
-                    <div className="wallet-label">Bonus</div>
+                    <div className="wallet-label">
+                      Bonus
+                    </div>
                     <div className="wallet-value">
                       {money(wallet?.bonus_balance)}
                     </div>
                   </div>
 
                   <div className="wallet-card">
-                    <div className="wallet-label">Winning</div>
+                    <div className="wallet-label">
+                      Winning
+                    </div>
                     <div className="wallet-value">
                       {money(wallet?.winning_balance)}
                     </div>
