@@ -73,16 +73,27 @@ function getClientIP(request: NextRequest): string | null {
 }
 
 function getDeviceId(value: unknown): string | null {
-  const id = String(value || "").trim();
-  return id && id.length <= 200 ? id : null;
+  const id = String(value || '').trim();
+  return id ? id.slice(0, 200) : null;
 }
 
 function getUserAgent(request: NextRequest): string | null {
-  const ua = request.headers.get("user-agent");
+  const ua = request.headers.get('user-agent');
   return ua ? ua.slice(0, 1000) : null;
 }
 
 async function createSession(userId: string) {
+  // Only one active session is allowed per user.
+  const { error: deleteError } = await supabaseAdmin
+    .from('user_sessions')
+    .delete()
+    .eq('user_id', userId);
+
+  if (deleteError) {
+    console.error('Old session cleanup error:', deleteError);
+    throw new Error('SESSION_CREATE_FAILED');
+  }
+
   const token = generateSessionToken();
   const tokenHash = hashValue(token);
 
@@ -91,7 +102,7 @@ async function createSession(userId: string) {
   );
 
   const { error } = await supabaseAdmin
-    .from("user_sessions")
+    .from('user_sessions')
     .insert({
       user_id: userId,
       token_hash: tokenHash,
@@ -99,20 +110,21 @@ async function createSession(userId: string) {
     });
 
   if (error) {
-    console.error("Session insert error:", error);
-    throw new Error("SESSION_CREATE_FAILED");
+    console.error('Session insert error:', error);
+    throw new Error('SESSION_CREATE_FAILED');
   }
 
   const cookieStore = await cookies();
 
-  cookieStore.set("gamerzadda_session", token, {
+  cookieStore.set('gamerzadda_session', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
     expires: expiresAt,
   });
 }
+
 
 async function sendSMS(phone: string, otp: string) {
   const username = process.env.HSP_SMS_USERNAME;
@@ -447,7 +459,7 @@ export async function POST(request: NextRequest) {
           await supabaseAdmin
             .from("users")
             .select(
-              "id, phone, status, phone_verified"
+              "id, phone, status, phone_verified, device_id"
             )
             .eq("phone", phone)
             .maybeSingle();
@@ -520,46 +532,53 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        const { data: currentDevice } = await supabaseAdmin
-          .from("users")
-          .select("device_id")
-          .eq("id", user.id)
-          .maybeSingle();
-
         const deviceChanged =
-          !!deviceId &&
-          !!currentDevice?.device_id &&
-          currentDevice.device_id !== deviceId;
+          !!deviceId && !!user.device_id && user.device_id !== deviceId;
+        const nowIso = new Date().toISOString();
 
-        const loginNow = new Date().toISOString();
-
-        await supabaseAdmin
+        const { error: deviceUpdateError } = await supabaseAdmin
           .from("users")
           .update({
             ip_address: clientIp,
-            device_id: deviceId || currentDevice?.device_id || null,
+            device_id: deviceId,
             device_user_agent: userAgent,
-            last_login_at: loginNow,
-            ...(deviceChanged ? { device_changed_at: loginNow } : {}),
-            updated_at: loginNow,
+            last_login_at: nowIso,
+            device_changed_at: deviceChanged ? nowIso : undefined,
+            phone_verified: true,
+            updated_at: nowIso,
           })
           .eq("id", user.id);
 
-        await supabaseAdmin.from("login_history").insert({
-          user_id: user.id,
-          ip_address: clientIp,
-          device_id: deviceId || currentDevice?.device_id || null,
-          user_agent: userAgent,
-          device_changed: deviceChanged,
-        });
+        if (deviceUpdateError) {
+          console.error("Login device update error:", deviceUpdateError);
+          return NextResponse.json(
+            { success: false, message: "Unable to update login details." },
+            { status: 500 }
+          );
+        }
+
+        const { error: historyError } = await supabaseAdmin
+          .from("login_history")
+          .insert({
+            user_id: user.id,
+            ip_address: clientIp,
+            device_id: deviceId,
+            user_agent: userAgent,
+            device_changed: deviceChanged,
+          });
+
+        if (historyError) console.error("Login history error:", historyError);
 
         await createSession(user.id);
 
         return NextResponse.json({
           success: true,
           code: "LOGIN_SUCCESS",
-          message: "Login successful",
+          message: deviceChanged
+            ? "Login successful. Previous device has been logged out."
+            : "Login successful",
           redirect: "/",
+          deviceChanged,
         });
       }
 
@@ -632,7 +651,7 @@ export async function POST(request: NextRequest) {
           data: existingUser,
         } = await supabaseAdmin
           .from("users")
-          .select("id, status")
+          .select("id, status, device_id")
           .eq("phone", phone)
           .maybeSingle();
 
@@ -655,38 +674,32 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          const { data: currentDevice } = await supabaseAdmin
-            .from("users")
-            .select("device_id")
-            .eq("id", existingUser.id)
-            .maybeSingle();
-
+          const nowIso = new Date().toISOString();
           const deviceChanged =
-            !!deviceId &&
-            !!currentDevice?.device_id &&
-            currentDevice.device_id !== deviceId;
-
-          const loginNow = new Date().toISOString();
+            !!deviceId && !!existingUser.device_id && existingUser.device_id !== deviceId;
 
           await supabaseAdmin
             .from("users")
             .update({
               ip_address: clientIp,
-              device_id: deviceId || currentDevice?.device_id || null,
+              device_id: deviceId,
               device_user_agent: userAgent,
-              last_login_at: loginNow,
-              ...(deviceChanged ? { device_changed_at: loginNow } : {}),
-              updated_at: loginNow,
+              last_login_at: nowIso,
+              device_changed_at: deviceChanged ? nowIso : undefined,
+              updated_at: nowIso,
             })
             .eq("id", existingUser.id);
 
-          await supabaseAdmin.from("login_history").insert({
-            user_id: existingUser.id,
-            ip_address: clientIp,
-            device_id: deviceId || currentDevice?.device_id || null,
-            user_agent: userAgent,
-            device_changed: deviceChanged,
-          });
+          const { error: historyError } = await supabaseAdmin
+            .from("login_history")
+            .insert({
+              user_id: existingUser.id,
+              ip_address: clientIp,
+              device_id: deviceId,
+              user_agent: userAgent,
+              device_changed: deviceChanged,
+            });
+          if (historyError) console.error("Login history error:", historyError);
 
           await createSession(existingUser.id);
 
@@ -803,19 +816,23 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        await supabaseAdmin.from("login_history").insert({
-          user_id: newUser.id,
-          ip_address: clientIp,
-          device_id: deviceId,
-          user_agent: userAgent,
-          device_changed: false,
-        });
-
         // Delete pending signup
         await supabaseAdmin
           .from("pending_signups")
           .delete()
           .eq("phone", phone);
+
+        // Record initial login/device.
+        const { error: historyError } = await supabaseAdmin
+          .from("login_history")
+          .insert({
+            user_id: newUser.id,
+            ip_address: clientIp,
+            device_id: deviceId,
+            user_agent: userAgent,
+            device_changed: false,
+          });
+        if (historyError) console.error("Signup login history error:", historyError);
 
         // Create proper login session
         await createSession(newUser.id);
