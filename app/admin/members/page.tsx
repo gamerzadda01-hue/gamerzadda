@@ -1,123 +1,123 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase";
 
 type Member = {
   id: string;
   full_name: string | null;
-  email: string | null;
   phone: string | null;
-  game_name: string | null;
+  email: string | null;
   free_fire_uid: string | null;
   role: string | null;
   created_at: string | null;
+  ip_address: string | null;
+  game_name?: string | null;
+  status?: string | null;
 };
 
 type Wallet = {
-  deposit_balance: number;
-  bonus_balance: number;
-  winning_balance: number;
+  deposit_balance: number | null;
+  bonus_balance: number | null;
+  winning_balance: number | null;
 };
 
 export default function MembersPage() {
+  const supabase = createClient();
+
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Member | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
 
   useEffect(() => {
-    checkAdminAndLoad();
+    loadMembers();
   }, []);
 
-  async function checkAdminAndLoad() {
+  async function loadMembers() {
+    setLoading(true);
+    setError("");
+
     try {
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
-        window.location.href = "/admin/login";
+        setError("Admin login required.");
         return;
       }
 
-      const { data: admin } = await supabase
+      const { data: adminUser, error: adminError } = await supabase
         .from("users")
         .select("role")
         .eq("id", user.id)
         .single();
 
-      if (!admin || admin.role !== "admin") {
-        await supabase.auth.signOut();
-        window.location.href = "/admin/login";
+      if (adminError || adminUser?.role !== "admin") {
+        setError("Access denied. Admin only.");
         return;
       }
 
-      await loadMembers();
-    } catch (error) {
-      console.error(error);
+      const { data, error: membersError } = await supabase
+        .from("users")
+        .select(
+          `
+            id,
+            full_name,
+            phone,
+            email,
+            free_fire_uid,
+            role,
+            created_at,
+            ip_address,
+            game_name,
+            status
+          `
+        )
+        .order("created_at", { ascending: false });
+
+      if (membersError) {
+        throw new Error(membersError.message);
+      }
+
+      setMembers((data || []) as Member[]);
+    } catch (err: any) {
+      setError(err?.message || "Unable to load members.");
+    } finally {
       setLoading(false);
     }
-  }
-
-  async function loadMembers() {
-    setLoading(true);
-
-    const { data, error } = await supabase
-      .from("users")
-      .select(
-        "id,full_name,email,phone,game_name,free_fire_uid,role,created_at"
-      )
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Members loading error:", error);
-      alert("Members loading failed: " + error.message);
-      setLoading(false);
-      return;
-    }
-
-    setMembers(data || []);
-    setLoading(false);
   }
 
   async function openMember(member: Member) {
-    setSelected(member);
+    setSelectedMember(member);
     setWallet(null);
     setWalletLoading(true);
 
-    const { data, error } = await supabase
-      .from("wallet_balances")
-      .select("deposit_balance,bonus_balance,winning_balance")
-      .eq("user_id", member.id)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from("wallet_balances")
+        .select(
+          `
+            deposit_balance,
+            bonus_balance,
+            winning_balance
+          `
+        )
+        .eq("user_id", member.id)
+        .maybeSingle();
 
-    if (error) {
-      console.error("Wallet loading error:", error);
+      if (error) {
+        console.error("Wallet error:", error);
+      }
+
+      setWallet(data || null);
+    } finally {
+      setWalletLoading(false);
     }
-
-    setWallet(data || {
-      deposit_balance: 0,
-      bonus_balance: 0,
-      winning_balance: 0,
-    });
-
-    setWalletLoading(false);
-  }
-
-  function money(value: number | null | undefined) {
-    return `₹${Number(value || 0).toFixed(2)}`;
-  }
-
-  function formatDate(value: string | null) {
-    if (!value) return "-";
-
-    return new Date(value).toLocaleString("en-IN", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
   }
 
   const filteredMembers = useMemo(() => {
@@ -125,27 +125,57 @@ export default function MembersPage() {
 
     if (!q) return members;
 
-    return members.filter((member) =>
-      [
+    return members.filter((member) => {
+      const values = [
+        member.id,
         member.full_name,
-        member.email,
         member.phone,
-        member.game_name,
+        member.email,
         member.free_fire_uid,
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(q))
-    );
+        member.game_name,
+        member.role,
+        member.status,
+        member.ip_address,
+      ];
+
+      return values.some((value) =>
+        String(value || "")
+          .toLowerCase()
+          .includes(q)
+      );
+    });
   }, [members, search]);
 
+  function formatDate(date: string | null) {
+    if (!date) return "-";
+
+    return new Date(date).toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function shortId(id: string) {
+    if (!id) return "-";
+    return `${id.slice(0, 8)}...${id.slice(-6)}`;
+  }
+
+  function money(value: number | null | undefined) {
+    return `₹${Number(value || 0).toFixed(2)}`;
+  }
+
   return (
-    <main className="members-page">
+    <div className="members-page">
       <style jsx>{`
         .members-page {
           min-height: 100vh;
           padding: 24px;
-          background: #f5f7fb;
-          color: #111827;
+          background: #070b12;
+          color: #e9eef7;
+          box-sizing: border-box;
         }
 
         .header {
@@ -156,103 +186,107 @@ export default function MembersPage() {
           margin-bottom: 20px;
         }
 
-        .eyebrow {
-          color: #e9163a;
-          font-size: 9px;
+        .title {
+          margin: 0;
+          font-size: 22px;
           font-weight: 900;
-          letter-spacing: 1.8px;
-        }
-
-        h1 {
-          margin: 5px 0 0;
-          font-size: 28px;
-          font-weight: 900;
-          color: #111827;
+          letter-spacing: -0.4px;
         }
 
         .subtitle {
-          margin-top: 6px;
-          color: #64748b;
-          font-size: 12px;
+          margin: 6px 0 0;
+          color: #7f8ca1;
+          font-size: 11px;
+        }
+
+        .header-right {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .count {
+          padding: 8px 11px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0d1520;
+          color: #aeb9c9;
+          font-size: 10px;
+          font-weight: 800;
         }
 
         .refresh {
-          border: 0;
-          border-radius: 9px;
-          padding: 11px 17px;
-          background: #111827;
-          color: white;
-          font-size: 11px;
+          border: 1px solid #263448;
+          background: #101925;
+          color: #e9eef7;
+          border-radius: 8px;
+          padding: 8px 12px;
+          font-size: 10px;
           font-weight: 800;
           cursor: pointer;
         }
 
+        .refresh:hover {
+          background: #172334;
+        }
+
         .toolbar {
-          display: flex;
-          gap: 12px;
-          align-items: center;
-          margin-bottom: 15px;
+          margin-bottom: 14px;
         }
 
         .search {
-          flex: 1;
-          height: 44px;
-          border: 1px solid #dbe1ea;
-          border-radius: 10px;
-          padding: 0 14px;
+          width: 100%;
+          height: 42px;
+          box-sizing: border-box;
+          border: 1px solid #1d2a3b;
+          border-radius: 9px;
           outline: none;
-          background: white;
-          color: #111827;
-          font-size: 12px;
+          padding: 0 14px;
+          background: #0d1520;
+          color: #fff;
+          font-size: 11px;
+        }
+
+        .search::placeholder {
+          color: #5f6d81;
         }
 
         .search:focus {
-          border-color: #e9163a;
-          box-shadow: 0 0 0 3px rgba(233, 22, 58, 0.08);
-        }
-
-        .count {
-          padding: 12px 15px;
-          border-radius: 10px;
-          background: white;
-          border: 1px solid #e1e6ee;
-          color: #64748b;
-          font-size: 11px;
-          font-weight: 800;
-          white-space: nowrap;
+          border-color: #ef1638;
         }
 
         .table-wrap {
+          width: 100%;
           overflow-x: auto;
-          background: white;
-          border: 1px solid #e1e6ee;
-          border-radius: 13px;
-          box-shadow: 0 5px 20px rgba(15, 23, 42, 0.04);
+          border: 1px solid #1d2a3b;
+          border-radius: 10px;
+          background: #0d1520;
         }
 
         table {
           width: 100%;
-          min-width: 900px;
+          min-width: 1250px;
           border-collapse: collapse;
         }
 
         th {
-          padding: 13px 15px;
+          padding: 12px 13px;
           text-align: left;
-          background: #f8fafc;
-          color: #64748b;
-          font-size: 9px;
+          background: #101a27;
+          color: #68778c;
+          font-size: 8px;
           text-transform: uppercase;
-          letter-spacing: 0.7px;
-          font-weight: 900;
-          border-bottom: 1px solid #e5e7eb;
+          letter-spacing: 1px;
+          white-space: nowrap;
+          border-bottom: 1px solid #1d2a3b;
         }
 
         td {
-          padding: 14px 15px;
-          border-bottom: 1px solid #eef1f5;
-          font-size: 11px;
-          color: #334155;
+          padding: 12px 13px;
+          border-bottom: 1px solid #172333;
+          color: #c5cfdd;
+          font-size: 10px;
+          white-space: nowrap;
         }
 
         tr:last-child td {
@@ -261,468 +295,512 @@ export default function MembersPage() {
 
         tbody tr {
           cursor: pointer;
-          transition: 0.15s ease;
+          transition: background 0.15s ease;
         }
 
         tbody tr:hover {
-          background: #fafbfc;
+          background: #111c2a;
         }
 
-        .name {
+        .member-name {
+          color: #fff;
           font-weight: 800;
-          color: #111827;
         }
 
-        .muted {
-          margin-top: 3px;
-          color: #94a3b8;
+        .id {
+          color: #738197;
+          font-family: monospace;
           font-size: 9px;
         }
 
         .uid {
+          color: #f0f4fa;
           font-family: monospace;
           font-weight: 700;
-          color: #475569;
+        }
+
+        .email {
+          color: #aab6c7;
+        }
+
+        .phone {
+          color: #d2d9e4;
+        }
+
+        .ip {
+          color: #8997aa;
+          font-family: monospace;
         }
 
         .role {
           display: inline-flex;
-          padding: 5px 8px;
-          border-radius: 6px;
-          background: #f1f5f9;
-          color: #475569;
+          align-items: center;
+          padding: 4px 7px;
+          border-radius: 5px;
+          font-size: 8px;
+          font-weight: 900;
+          text-transform: uppercase;
+        }
+
+        .role.admin {
+          background: rgba(239, 22, 56, 0.13);
+          color: #ff5069;
+          border: 1px solid rgba(239, 22, 56, 0.22);
+        }
+
+        .role.user {
+          background: rgba(40, 180, 110, 0.1);
+          color: #66d69b;
+          border: 1px solid rgba(40, 180, 110, 0.18);
+        }
+
+        .status {
+          color: #66d69b;
           font-size: 9px;
           font-weight: 800;
-          text-transform: capitalize;
+          text-transform: uppercase;
         }
 
-        .view {
-          border: 1px solid #e2e8f0;
-          background: white;
-          color: #e9163a;
-          border-radius: 7px;
-          padding: 7px 10px;
-          font-size: 9px;
-          font-weight: 900;
-          cursor: pointer;
+        .status.blocked {
+          color: #ff526b;
         }
 
-        .empty {
-          padding: 50px 20px;
+        .empty,
+        .loading,
+        .error {
+          padding: 45px 20px;
           text-align: center;
-          color: #94a3b8;
-          font-size: 12px;
+          color: #738197;
+          font-size: 11px;
         }
 
-        .overlay {
+        .error {
+          color: #ff647b;
+        }
+
+        .drawer-backdrop {
           position: fixed;
           inset: 0;
           z-index: 200;
-          display: flex;
-          justify-content: flex-end;
-          background: rgba(15, 23, 42, 0.45);
+          background: rgba(0, 0, 0, 0.65);
           backdrop-filter: blur(3px);
         }
 
         .drawer {
+          position: fixed;
+          z-index: 210;
+          top: 0;
+          right: 0;
           width: 430px;
-          max-width: 94vw;
-          height: 100%;
+          max-width: 92vw;
+          height: 100vh;
           overflow-y: auto;
+          box-sizing: border-box;
           padding: 22px;
-          background: white;
-          box-shadow: -10px 0 35px rgba(0, 0, 0, 0.15);
+          background: #0a111b;
+          border-left: 1px solid #253448;
+          box-shadow: -20px 0 60px rgba(0, 0, 0, 0.45);
         }
 
-        .drawer-head {
+        .drawer-header {
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: flex-start;
           gap: 15px;
-          margin-bottom: 20px;
+          margin-bottom: 22px;
         }
 
-        .drawer-head h2 {
+        .drawer-title {
           margin: 0;
-          font-size: 19px;
+          font-size: 18px;
           font-weight: 900;
+        }
+
+        .drawer-subtitle {
+          margin-top: 5px;
+          color: #738197;
+          font-size: 10px;
         }
 
         .close {
           width: 32px;
           height: 32px;
-          border: 0;
+          border: 1px solid #263448;
           border-radius: 8px;
-          background: #f1f5f9;
-          color: #475569;
+          background: #101925;
+          color: #fff;
           cursor: pointer;
-          font-size: 16px;
+          font-size: 15px;
         }
 
-        .profile {
-          padding: 16px;
-          border-radius: 12px;
-          background: #f8fafc;
-          border: 1px solid #e5e7eb;
-          margin-bottom: 14px;
+        .section {
+          margin-top: 18px;
         }
 
-        .profile-name {
-          font-size: 18px;
+        .section-title {
+          margin-bottom: 9px;
+          color: #66758a;
+          font-size: 8px;
+          letter-spacing: 1.4px;
+          text-transform: uppercase;
           font-weight: 900;
-          color: #111827;
         }
 
-        .profile-email {
-          margin-top: 4px;
-          color: #64748b;
-          font-size: 10px;
-        }
-
-        .details {
+        .info-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 9px;
-          margin-top: 14px;
+          gap: 8px;
         }
 
-        .detail {
+        .info {
           padding: 11px;
-          border: 1px solid #e5e7eb;
-          border-radius: 9px;
-          background: white;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
         }
 
-        .detail-label {
-          color: #94a3b8;
+        .info.full {
+          grid-column: 1 / -1;
+        }
+
+        .info-label {
+          color: #647186;
           font-size: 8px;
-          font-weight: 800;
-          text-transform: uppercase;
+          margin-bottom: 5px;
         }
 
-        .detail-value {
-          margin-top: 4px;
-          color: #1e293b;
-          font-size: 11px;
-          font-weight: 800;
+        .info-value {
+          color: #edf2f8;
+          font-size: 10px;
+          font-weight: 700;
           word-break: break-word;
-        }
-
-        .wallet-title {
-          margin: 20px 0 10px;
-          font-size: 13px;
-          font-weight: 900;
         }
 
         .wallet-grid {
           display: grid;
-          grid-template-columns: 1fr;
-          gap: 9px;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 8px;
         }
 
         .wallet-card {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 13px;
-          border-radius: 10px;
-          background: #f8fafc;
-          border: 1px solid #e5e7eb;
+          padding: 12px 9px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
+          text-align: center;
         }
 
-        .wallet-card span {
-          color: #64748b;
-          font-size: 10px;
-          font-weight: 700;
+        .wallet-label {
+          color: #647186;
+          font-size: 7px;
+          text-transform: uppercase;
+          letter-spacing: 0.6px;
         }
 
-        .wallet-card strong {
-          font-size: 14px;
-          color: #111827;
+        .wallet-value {
+          margin-top: 7px;
+          color: #fff;
+          font-size: 12px;
+          font-weight: 900;
         }
 
-        .total {
-          margin-top: 9px;
-          padding: 15px;
-          border-radius: 10px;
-          background: #111827;
-          color: white;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .total span {
-          font-size: 10px;
-          color: #cbd5e1;
-        }
-
-        .total strong {
-          font-size: 17px;
-        }
-
-        @media (max-width: 650px) {
+        @media (max-width: 700px) {
           .members-page {
-            padding: 14px;
+            padding: 16px;
           }
 
           .header {
             align-items: flex-start;
-          }
-
-          h1 {
-            font-size: 22px;
-          }
-
-          .refresh {
-            padding: 9px 11px;
-          }
-
-          .toolbar {
             flex-direction: column;
-            align-items: stretch;
           }
 
-          .count {
-            text-align: center;
+          .header-right {
+            width: 100%;
+            justify-content: space-between;
+          }
+
+          .wallet-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .info-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .info.full {
+            grid-column: auto;
           }
         }
       `}</style>
 
       <div className="header">
         <div>
-          <div className="eyebrow">GAMERZADDA ADMIN</div>
-          <h1>Member Database</h1>
-          <div className="subtitle">
-            Search and inspect registered GamerzAdda members.
-          </div>
+          <h1 className="title">Member Database</h1>
+          <p className="subtitle">
+            Manage and view all registered GamerzAdda members.
+          </p>
         </div>
 
-        <button className="refresh" onClick={loadMembers}>
-          ↻ Refresh
-        </button>
+        <div className="header-right">
+          <div className="count">
+            {filteredMembers.length} / {members.length} MEMBERS
+          </div>
+
+          <button className="refresh" onClick={loadMembers}>
+            ↻ Refresh
+          </button>
+        </div>
       </div>
 
       <div className="toolbar">
         <input
           className="search"
+          placeholder="Search by Member ID, Name, Phone, Email, Free Fire UID, Game Name, Role or IP..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name, email, phone, game name or Free Fire UID..."
         />
-
-        <div className="count">
-          {filteredMembers.length} Members
-        </div>
       </div>
 
-      <div className="table-wrap">
-        {loading ? (
-          <div className="empty">Loading members...</div>
-        ) : filteredMembers.length === 0 ? (
+      {loading ? (
+        <div className="table-wrap">
+          <div className="loading">Loading members...</div>
+        </div>
+      ) : error ? (
+        <div className="table-wrap">
+          <div className="error">{error}</div>
+        </div>
+      ) : filteredMembers.length === 0 ? (
+        <div className="table-wrap">
           <div className="empty">No members found.</div>
-        ) : (
+        </div>
+      ) : (
+        <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Member</th>
+                <th>Member ID</th>
+                <th>Name</th>
                 <th>Phone</th>
-                <th>Game Name</th>
+                <th>Email</th>
                 <th>Free Fire UID</th>
                 <th>Role</th>
                 <th>Joined</th>
-                <th></th>
+                <th>IP Address</th>
+                <th>Status</th>
               </tr>
             </thead>
 
             <tbody>
               {filteredMembers.map((member) => (
-                <tr
-                  key={member.id}
-                  onClick={() => openMember(member)}
-                >
+                <tr key={member.id} onClick={() => openMember(member)}>
                   <td>
-                    <div className="name">
-                      {member.full_name || "Unnamed User"}
-                    </div>
-                    <div className="muted">
-                      {member.email || "-"}
-                    </div>
-                  </td>
-
-                  <td>{member.phone || "-"}</td>
-
-                  <td>
-                    {member.game_name || "-"}
-                  </td>
-
-                  <td className="uid">
-                    {member.free_fire_uid || "-"}
-                  </td>
-
-                  <td>
-                    <span className="role">
-                      {member.role || "user"}
+                    <span className="id" title={member.id}>
+                      {shortId(member.id)}
                     </span>
                   </td>
 
                   <td>
-                    {formatDate(member.created_at)}
+                    <span className="member-name">
+                      {member.full_name || member.game_name || "—"}
+                    </span>
                   </td>
 
                   <td>
-                    <button
-                      className="view"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openMember(member);
-                      }}
+                    <span className="phone">
+                      {member.phone || "—"}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span className="email">
+                      {member.email || "—"}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span className="uid">
+                      {member.free_fire_uid || "—"}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span
+                      className={`role ${
+                        String(member.role || "user").toLowerCase() === "admin"
+                          ? "admin"
+                          : "user"
+                      }`}
                     >
-                      View
-                    </button>
+                      {member.role || "user"}
+                    </span>
+                  </td>
+
+                  <td>{formatDate(member.created_at)}</td>
+
+                  <td>
+                    <span className="ip">
+                      {member.ip_address || "Not recorded"}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span
+                      className={`status ${
+                        String(member.status || "active").toLowerCase() ===
+                        "blocked"
+                          ? "blocked"
+                          : ""
+                      }`}
+                    >
+                      {member.status || "active"}
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
-      {selected && (
-        <div
-          className="overlay"
-          onClick={() => setSelected(null)}
-        >
-          <aside
-            className="drawer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="drawer-head">
-              <h2>Member Details</h2>
+      {selectedMember && (
+        <>
+          <button
+            className="drawer-backdrop"
+            aria-label="Close member details"
+            onClick={() => setSelectedMember(null)}
+          />
+
+          <aside className="drawer">
+            <div className="drawer-header">
+              <div>
+                <h2 className="drawer-title">
+                  {selectedMember.full_name ||
+                    selectedMember.game_name ||
+                    "Member"}
+                </h2>
+
+                <div className="drawer-subtitle">
+                  Member details & wallet information
+                </div>
+              </div>
 
               <button
                 className="close"
-                onClick={() => setSelected(null)}
+                onClick={() => setSelectedMember(null)}
               >
                 ×
               </button>
             </div>
 
-            <div className="profile">
-              <div className="profile-name">
-                {selected.full_name || "Unnamed User"}
-              </div>
+            <div className="section">
+              <div className="section-title">Member Information</div>
 
-              <div className="profile-email">
-                {selected.email || "-"}
-              </div>
+              <div className="info-grid">
+                <div className="info full">
+                  <div className="info-label">Member ID</div>
+                  <div className="info-value">{selectedMember.id}</div>
+                </div>
 
-              <div className="details">
-                <div className="detail">
-                  <div className="detail-label">
-                    Phone
-                  </div>
-                  <div className="detail-value">
-                    {selected.phone || "-"}
+                <div className="info">
+                  <div className="info-label">Full Name</div>
+                  <div className="info-value">
+                    {selectedMember.full_name || "—"}
                   </div>
                 </div>
 
-                <div className="detail">
-                  <div className="detail-label">
-                    Game Name
-                  </div>
-                  <div className="detail-value">
-                    {selected.game_name || "-"}
+                <div className="info">
+                  <div className="info-label">Game Name</div>
+                  <div className="info-value">
+                    {selectedMember.game_name || "—"}
                   </div>
                 </div>
 
-                <div className="detail">
-                  <div className="detail-label">
-                    Free Fire UID
-                  </div>
-                  <div className="detail-value">
-                    {selected.free_fire_uid || "-"}
+                <div className="info">
+                  <div className="info-label">Phone</div>
+                  <div className="info-value">
+                    {selectedMember.phone || "—"}
                   </div>
                 </div>
 
-                <div className="detail">
-                  <div className="detail-label">
-                    Role
-                  </div>
-                  <div className="detail-value">
-                    {selected.role || "user"}
+                <div className="info">
+                  <div className="info-label">Email</div>
+                  <div className="info-value">
+                    {selectedMember.email || "—"}
                   </div>
                 </div>
 
-                <div className="detail">
-                  <div className="detail-label">
-                    Member ID
-                  </div>
-                  <div className="detail-value">
-                    {selected.id}
+                <div className="info">
+                  <div className="info-label">Free Fire UID</div>
+                  <div className="info-value">
+                    {selectedMember.free_fire_uid || "—"}
                   </div>
                 </div>
 
-                <div className="detail">
-                  <div className="detail-label">
-                    Joined
+                <div className="info">
+                  <div className="info-label">Role</div>
+                  <div className="info-value">
+                    {selectedMember.role || "user"}
                   </div>
-                  <div className="detail-value">
-                    {formatDate(selected.created_at)}
+                </div>
+
+                <div className="info">
+                  <div className="info-label">Status</div>
+                  <div className="info-value">
+                    {selectedMember.status || "active"}
+                  </div>
+                </div>
+
+                <div className="info">
+                  <div className="info-label">IP Address</div>
+                  <div className="info-value">
+                    {selectedMember.ip_address || "Not recorded"}
+                  </div>
+                </div>
+
+                <div className="info full">
+                  <div className="info-label">Joined</div>
+                  <div className="info-value">
+                    {formatDate(selectedMember.created_at)}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="wallet-title">
-              Wallet Balances
-            </div>
+            <div className="section">
+              <div className="section-title">Wallet Balance</div>
 
-            {walletLoading ? (
-              <div className="empty">
-                Loading wallet...
-              </div>
-            ) : (
-              <>
+              {walletLoading ? (
+                <div className="info">
+                  <div className="info-value">Loading wallet...</div>
+                </div>
+              ) : (
                 <div className="wallet-grid">
                   <div className="wallet-card">
-                    <span>Deposit Balance</span>
-                    <strong>
+                    <div className="wallet-label">Deposit</div>
+                    <div className="wallet-value">
                       {money(wallet?.deposit_balance)}
-                    </strong>
+                    </div>
                   </div>
 
                   <div className="wallet-card">
-                    <span>Bonus Balance</span>
-                    <strong>
+                    <div className="wallet-label">Bonus</div>
+                    <div className="wallet-value">
                       {money(wallet?.bonus_balance)}
-                    </strong>
+                    </div>
                   </div>
 
                   <div className="wallet-card">
-                    <span>Winning Balance</span>
-                    <strong>
+                    <div className="wallet-label">Winning</div>
+                    <div className="wallet-value">
                       {money(wallet?.winning_balance)}
-                    </strong>
+                    </div>
                   </div>
                 </div>
-
-                <div className="total">
-                  <span>Total Wallet Balance</span>
-
-                  <strong>
-                    {money(
-                      Number(wallet?.deposit_balance || 0) +
-                        Number(wallet?.bonus_balance || 0) +
-                        Number(wallet?.winning_balance || 0)
-                    )}
-                  </strong>
-                </div>
-              </>
-            )}
+              )}
+            </div>
           </aside>
-        </div>
+        </>
       )}
-    </main>
+    </div>
   );
 }
