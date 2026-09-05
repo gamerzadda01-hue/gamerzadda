@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -56,6 +56,30 @@ function generateReferralCode(): string {
       .toString("hex")
       .toUpperCase()
   );
+}
+
+function getClientIP(request: NextRequest): string | null {
+  const forwardedFor = request.headers.get("x-forwarded-for");
+
+  if (forwardedFor) {
+    return forwardedFor.split(",")[0].trim();
+  }
+
+  return (
+    request.headers.get("x-real-ip") ||
+    request.headers.get("cf-connecting-ip") ||
+    null
+  );
+}
+
+function getDeviceId(value: unknown): string | null {
+  const id = String(value || "").trim();
+  return id && id.length <= 200 ? id : null;
+}
+
+function getUserAgent(request: NextRequest): string | null {
+  const ua = request.headers.get("user-agent");
+  return ua ? ua.slice(0, 1000) : null;
 }
 
 async function createSession(userId: string) {
@@ -347,7 +371,7 @@ async function verifyOTP(
 };
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
@@ -355,6 +379,9 @@ export async function POST(request: Request) {
 
     const action = body.action || "send";
     const flow = body.flow || "login";
+    const deviceId = getDeviceId(body.deviceId);
+    const clientIp = getClientIP(request);
+    const userAgent = getUserAgent(request);
 
     // Validate flow
     if (flow !== "login" && flow !== "signup") {
@@ -493,6 +520,39 @@ export async function POST(request: Request) {
           }
         }
 
+        const { data: currentDevice } = await supabaseAdmin
+          .from("users")
+          .select("device_id")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        const deviceChanged =
+          !!deviceId &&
+          !!currentDevice?.device_id &&
+          currentDevice.device_id !== deviceId;
+
+        const loginNow = new Date().toISOString();
+
+        await supabaseAdmin
+          .from("users")
+          .update({
+            ip_address: clientIp,
+            device_id: deviceId || currentDevice?.device_id || null,
+            device_user_agent: userAgent,
+            last_login_at: loginNow,
+            ...(deviceChanged ? { device_changed_at: loginNow } : {}),
+            updated_at: loginNow,
+          })
+          .eq("id", user.id);
+
+        await supabaseAdmin.from("login_history").insert({
+          user_id: user.id,
+          ip_address: clientIp,
+          device_id: deviceId || currentDevice?.device_id || null,
+          user_agent: userAgent,
+          device_changed: deviceChanged,
+        });
+
         await createSession(user.id);
 
         return NextResponse.json({
@@ -595,6 +655,39 @@ export async function POST(request: Request) {
             );
           }
 
+          const { data: currentDevice } = await supabaseAdmin
+            .from("users")
+            .select("device_id")
+            .eq("id", existingUser.id)
+            .maybeSingle();
+
+          const deviceChanged =
+            !!deviceId &&
+            !!currentDevice?.device_id &&
+            currentDevice.device_id !== deviceId;
+
+          const loginNow = new Date().toISOString();
+
+          await supabaseAdmin
+            .from("users")
+            .update({
+              ip_address: clientIp,
+              device_id: deviceId || currentDevice?.device_id || null,
+              device_user_agent: userAgent,
+              last_login_at: loginNow,
+              ...(deviceChanged ? { device_changed_at: loginNow } : {}),
+              updated_at: loginNow,
+            })
+            .eq("id", existingUser.id);
+
+          await supabaseAdmin.from("login_history").insert({
+            user_id: existingUser.id,
+            ip_address: clientIp,
+            device_id: deviceId || currentDevice?.device_id || null,
+            user_agent: userAgent,
+            device_changed: deviceChanged,
+          });
+
           await createSession(existingUser.id);
 
           return NextResponse.json({
@@ -684,6 +777,10 @@ export async function POST(request: Request) {
             referral_code: ownReferralCode,
             referred_by:
               pendingSignup.referral_code || null,
+            ip_address: clientIp,
+            device_id: deviceId,
+            device_user_agent: userAgent,
+            last_login_at: nowIso,
             created_at: nowIso,
             updated_at: nowIso,
           })
@@ -705,6 +802,14 @@ export async function POST(request: Request) {
             { status: 500 }
           );
         }
+
+        await supabaseAdmin.from("login_history").insert({
+          user_id: newUser.id,
+          ip_address: clientIp,
+          device_id: deviceId,
+          user_agent: userAgent,
+          device_changed: false,
+        });
 
         // Delete pending signup
         await supabaseAdmin

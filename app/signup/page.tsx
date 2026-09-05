@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-function SignupPageContent() {
+export default function SignupPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -111,6 +111,22 @@ function SignupPageContent() {
           `signup-otp-${index - 1}`
         )
         ?.focus();
+    }
+  }
+
+
+  function getDeviceId(): string {
+    const key = "gamerzadda_device_id";
+    try {
+      const existing = window.localStorage.getItem(key);
+      if (existing) return existing;
+      const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+      window.localStorage.setItem(key, id);
+      return id;
+    } catch {
+      return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     }
   }
 
@@ -380,6 +396,7 @@ function SignupPageContent() {
             otp: enteredOtp,
             action: "verify",
             flow: "signup",
+            deviceId: getDeviceId(),
           }),
         }
       );
@@ -945,27 +962,3 @@ const linkButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
 };
-
-export default function SignupPage() {
-  return (
-    <Suspense
-      fallback={
-        <main
-          style={{
-            minHeight: "100vh",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "#050507",
-            color: "white",
-            fontSize: "16px",
-          }}
-        >
-          Loading...
-        </main>
-      }
-    >
-      <SignupPageContent />
-    </Suspense>
-  );
-}

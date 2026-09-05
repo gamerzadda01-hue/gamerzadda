@@ -1,10 +1,10 @@
-"use client";
+ "use client";
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-export default function AdminLogin() {
+export default function AdminLoginPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
@@ -12,131 +12,167 @@ export default function AdminLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: FormEvent) {
     e.preventDefault();
-
-    setLoading(true);
     setError("");
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error || !data.user) {
-      setError(error?.message || "Login failed");
-      setLoading(false);
+    if (!email.trim() || !password) {
+      setError("Please enter email and password.");
       return;
     }
 
-    // Check admin role
-    const { data: admin, error: adminError } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", data.user.id)
-      .single();
+    setLoading(true);
 
-    if (adminError || admin?.role !== "admin") {
-      await supabase.auth.signOut();
-      setError("Access denied. Admin account required.");
+    try {
+      const { data, error: loginError } =
+        await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+
+      if (loginError || !data.user) {
+        throw new Error(loginError?.message || "Login failed.");
+      }
+
+      const { data: admin, error: adminError } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", data.user.id)
+        .single();
+
+      if (adminError || admin?.role !== "admin") {
+        await supabase.auth.signOut();
+        throw new Error("Access denied. Admin account required.");
+      }
+
+      router.replace("/admin");
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.replace("/admin");
   }
 
   return (
-    <div
+    <main
       style={{
         minHeight: "100vh",
         display: "flex",
-        justifyContent: "center",
         alignItems: "center",
-        background: "#f5f5f5",
-        padding: 20,
+        justifyContent: "center",
+        padding: "20px",
+        background:
+          "linear-gradient(135deg,#070b14 0%,#0b1220 50%,#101827 100%)",
       }}
     >
-      <form
-        onSubmit={handleLogin}
+      <div
         style={{
           width: "100%",
-          maxWidth: 400,
-          background: "white",
-          padding: 30,
-          borderRadius: 16,
-          boxShadow: "0 5px 25px rgba(0,0,0,0.1)",
+          maxWidth: "420px",
+          background: "#fff",
+          borderRadius: "18px",
+          padding: "32px",
+          boxShadow: "0 20px 60px rgba(0,0,0,.35)",
         }}
       >
-        <h1 style={{ marginBottom: 8 }}>Admin Login</h1>
+        <div style={{ textAlign: "center", marginBottom: "28px" }}>
+          <div style={{ fontSize: "44px" }}>🔐</div>
+          <h1 style={{ margin: "10px 0 6px", fontSize: "28px" }}>
+            GamerzAdda
+          </h1>
+          <p style={{ margin: 0, color: "#666" }}>Admin Panel Login</p>
+        </div>
 
-        <p style={{ color: "#666", marginBottom: 25 }}>
-          Login to GamerzAdda Admin Panel
-        </p>
-
-        <input
-          type="email"
-          placeholder="Admin Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          style={{
-            width: "100%",
-            padding: 13,
-            marginBottom: 15,
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            boxSizing: "border-box",
-          }}
-        />
-
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          style={{
-            width: "100%",
-            padding: 13,
-            marginBottom: 15,
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            boxSizing: "border-box",
-          }}
-        />
-
-        {error && (
-          <div
+        <form onSubmit={handleLogin}>
+          <label
             style={{
-              color: "red",
-              background: "#ffecec",
-              padding: 10,
-              borderRadius: 8,
-              marginBottom: 15,
+              display: "block",
+              marginBottom: "7px",
+              fontWeight: 600,
             }}
           >
-            {error}
-          </div>
-        )}
+            Email
+          </label>
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            width: "100%",
-            padding: 14,
-            border: "none",
-            borderRadius: 8,
-            background: "#111",
-            color: "white",
-            fontSize: 16,
-            cursor: "pointer",
-          }}
-        >
-          {loading ? "Logging in..." : "Login"}
-        </button>
-      </form>
-    </div>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Admin email"
+            autoComplete="email"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "13px 14px",
+              border: "1px solid #ddd",
+              borderRadius: "10px",
+              marginBottom: "18px",
+              fontSize: "15px",
+            }}
+          />
+
+          <label
+            style={{
+              display: "block",
+              marginBottom: "7px",
+              fontWeight: 600,
+            }}
+          >
+            Password
+          </label>
+
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Admin password"
+            autoComplete="current-password"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "13px 14px",
+              border: "1px solid #ddd",
+              borderRadius: "10px",
+              marginBottom: "18px",
+              fontSize: "15px",
+            }}
+          />
+
+          {error && (
+            <div
+              style={{
+                background: "#fff1f2",
+                color: "#be123c",
+                border: "1px solid #fecdd3",
+                padding: "11px 12px",
+                borderRadius: "9px",
+                marginBottom: "16px",
+                fontSize: "14px",
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: "100%",
+              border: 0,
+              borderRadius: "10px",
+              padding: "14px",
+              background: loading ? "#777" : "#111827",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: "15px",
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Signing in..." : "Login to Admin Panel"}
+          </button>
+        </form>
+      </div>
+    </main>
   );
 }

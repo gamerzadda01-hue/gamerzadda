@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-function LoginPageContent() {
+export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -76,6 +76,22 @@ function LoginPageContent() {
       document
         .getElementById(`otp-${index - 1}`)
         ?.focus();
+    }
+  }
+
+
+  function getDeviceId(): string {
+    const key = "gamerzadda_device_id";
+    try {
+      const existing = window.localStorage.getItem(key);
+      if (existing) return existing;
+      const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+      window.localStorage.setItem(key, id);
+      return id;
+    } catch {
+      return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     }
   }
 
@@ -172,7 +188,6 @@ function LoginPageContent() {
       }
 
       setOtpSent(true);
-
       setOtp([
         "",
         "",
@@ -243,6 +258,7 @@ function LoginPageContent() {
             otp: enteredOtp,
             action: "verify",
             flow: "login",
+            deviceId: getDeviceId(),
           }),
         }
       );
@@ -616,30 +632,6 @@ function LoginPageContent() {
         )}
       </div>
     </main>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense
-      fallback={
-        <main
-          style={{
-            minHeight: "100vh",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "#050507",
-            color: "white",
-            fontSize: "16px",
-          }}
-        >
-          Loading...
-        </main>
-      }
-    >
-      <LoginPageContent />
-    </Suspense>
   );
 }
 

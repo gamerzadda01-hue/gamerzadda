@@ -18,6 +18,10 @@ type Member = {
   last_wallet_activity: string | null;
   referral_code: string | null;
   referred_by: string | null;
+  device_id?: string | null;
+  device_user_agent?: string | null;
+  last_login_at?: string | null;
+  device_changed_at?: string | null;
 };
 
 type Wallet = {
@@ -43,6 +47,7 @@ export default function MembersPage() {
   const [actionMessage, setActionMessage] = useState("");
   const [memberDetail, setMemberDetail] = useState<any>(null);
   const [referral, setReferral] = useState<any>(null);
+  const [loginHistory, setLoginHistory] = useState<any[]>([]);
 
   useEffect(() => {
     loadMembers();
@@ -97,6 +102,7 @@ export default function MembersPage() {
     setActionMessage("");
     setMemberDetail(null);
     setReferral(null);
+    setLoginHistory([]);
     setWalletLoading(true);
 
     try {
@@ -135,6 +141,7 @@ export default function MembersPage() {
       setHistory(result.history || []);
       setMemberDetail(result.member || null);
       setReferral(result.referral || null);
+      setLoginHistory(result.loginHistory || []);
     } catch (err) {
       console.error(err);
       setWallet(null);
@@ -915,7 +922,37 @@ export default function MembersPage() {
           font-size: 9px;
         }
 
-        .history-date {
+    
+    .security-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .security-card {
+      border: 1px solid #2a2a32;
+      background: #15151b;
+      border-radius: 12px;
+      padding: 12px;
+      min-width: 0;
+    }
+    .security-value {
+      margin-top: 5px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #eee;
+      word-break: break-word;
+    }
+    .security-mono {
+      font-family: monospace;
+      font-size: 11px;
+      color: #aaa;
+    }
+    .device-warning {
+      color: #f59e0b !important;
+    }
+
+    .history-date {
           margin-top: 4px;
           color: #65748a;
           font-size: 8px;
@@ -1044,6 +1081,8 @@ export default function MembersPage() {
                 <th>Role</th>
                 <th>Joined</th>
                 <th>IP Address</th>
+                <th>Device</th>
+                <th>Last Login</th>
                 <th>Total Wallet</th>
                 <th>Last Wallet Activity</th>
                 <th>Status</th>
@@ -1109,6 +1148,18 @@ export default function MembersPage() {
                   <td>
                     <span className="ip">
                       {member.ip_address || "Not recorded"}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span className={member.device_changed_at ? "device-warning" : "activity"}>
+                      {member.device_changed_at ? "⚠ Changed" : member.device_id ? "✓ Tracked" : "Not recorded"}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span className="activity">
+                      {member.last_login_at ? formatDate(member.last_login_at) : "Never"}
                     </span>
                   </td>
 
@@ -1354,6 +1405,55 @@ export default function MembersPage() {
                         </div>
                         <div className="referral-item-meta">
                           UID: {user.free_fire_uid || "—"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="section">
+              <div className="section-title">Device & Login Security</div>
+              <div className="security-grid">
+                <div className="security-card">
+                  <div className="info-label">Current IP</div>
+                  <div className="security-value">{memberDetail?.ip_address || selectedMember.ip_address || "Not recorded"}</div>
+                </div>
+                <div className="security-card">
+                  <div className="info-label">Device Status</div>
+                  <div className={`security-value ${memberDetail?.device_changed_at ? "device-warning" : ""}`}>
+                    {memberDetail?.device_changed_at ? "⚠ Device Changed" : "✓ No device change recorded"}
+                  </div>
+                </div>
+                <div className="security-card">
+                  <div className="info-label">Last Login</div>
+                  <div className="security-value">{formatDate(memberDetail?.last_login_at || null)}</div>
+                </div>
+                <div className="security-card">
+                  <div className="info-label">Device ID</div>
+                  <div className="security-value security-mono">{memberDetail?.device_id || "Not recorded"}</div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div className="referrer-title">Login / Device History</div>
+                {!loginHistory.length ? (
+                  <div className="no-history">No login history recorded yet.</div>
+                ) : (
+                  <div className="history-list">
+                    {loginHistory.map((login) => (
+                      <div className="history-item" key={`${login.id}-${login.created_at}`}>
+                        <div className="history-top">
+                          <span className={`history-type ${login.device_changed ? "device-warning" : ""}`}>
+                            {login.device_changed ? "⚠ NEW DEVICE" : "✓ LOGIN"}
+                          </span>
+                          <span className="history-date">{formatDate(login.created_at)}</span>
+                        </div>
+                        <div className="history-desc">IP: {login.ip_address || "Not recorded"}</div>
+                        <div className="history-date">Device ID: {login.device_id || "Not recorded"}</div>
+                        <div className="history-date" style={{ wordBreak: "break-word" }}>
+                          {login.user_agent || "User agent not recorded"}
                         </div>
                       </div>
                     ))}
