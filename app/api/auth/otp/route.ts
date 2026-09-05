@@ -123,10 +123,11 @@ async function sendSMS(phone: string, otp: string) {
 
   const result = await response.text();
 
-  console.log("HSP SMS Response:", result);
+  console.log("HSP SMS STATUS:", response.status);
+  console.log("HSP SMS RESPONSE:", result);
 
   if (!response.ok) {
-    throw new Error("SMS_PROVIDER_ERROR");
+    throw new Error(`SMS_PROVIDER_ERROR: ${result}`);
   }
 
   const normalizedResult = result.trim().toUpperCase();
@@ -136,7 +137,7 @@ async function sendSMS(phone: string, otp: string) {
     normalizedResult.includes("ERROR") ||
     normalizedResult.includes("FAILED")
   ) {
-    throw new Error("SMS_PROVIDER_ERROR");
+    throw new Error(`SMS_PROVIDER_ERROR: ${result}`);
   }
 
   return true;
