@@ -27,9 +27,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const sessionToken = decodeURIComponent(
-      sessionMatch[1]
-    );
+    const sessionToken = decodeURIComponent(sessionMatch[1]);
 
     const tokenHash = crypto
       .createHash("sha256")
@@ -44,10 +42,7 @@ export async function POST(request: Request) {
         .maybeSingle();
 
     if (sessionError) {
-      console.error(
-        "Session lookup error:",
-        sessionError
-      );
+      console.error("Session lookup error:", sessionError);
 
       return NextResponse.json(
         {
@@ -88,13 +83,9 @@ export async function POST(request: Request) {
     // ==========================================
 
     const body = await request.json();
-
     const amount = Number(body?.amount);
 
-    if (
-      !Number.isFinite(amount) ||
-      amount <= 0
-    ) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json(
         {
           success: false,
@@ -104,10 +95,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Only allow maximum 2 decimal places
-    if (
-      Math.round(amount * 100) / 100 !== amount
-    ) {
+    // Maximum 2 decimal places
+    if (Math.round(amount * 100) / 100 !== amount) {
       return NextResponse.json(
         {
           success: false,
@@ -150,24 +139,15 @@ export async function POST(request: Request) {
     let bonusPercent = 10;
 
     for (const setting of settings || []) {
-      if (
-        setting.key ===
-        "min_deposit_amount"
-      ) {
+      if (setting.key === "min_deposit_amount") {
         const value = Number(setting.value);
 
-        if (
-          Number.isFinite(value) &&
-          value > 0
-        ) {
+        if (Number.isFinite(value) && value > 0) {
           minDeposit = value;
         }
       }
 
-      if (
-        setting.key ===
-        "deposit_bonus_percent"
-      ) {
+      if (setting.key === "deposit_bonus_percent") {
         const value = Number(setting.value);
 
         if (
@@ -209,9 +189,7 @@ export async function POST(request: Request) {
     // ==========================================
 
     if (!process.env.PAY0_API_KEY) {
-      console.error(
-        "PAY0_API_KEY missing"
-      );
+      console.error("PAY0_API_KEY missing");
 
       return NextResponse.json(
         {
@@ -227,13 +205,10 @@ export async function POST(request: Request) {
     // APP URL
     // ==========================================
 
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL;
+    const appUrl = process.env.APP_URL;
 
     if (!appUrl) {
-      console.error(
-        "NEXT_PUBLIC_APP_URL missing"
-      );
+      console.error("APP_URL missing");
 
       return NextResponse.json(
         {
@@ -282,8 +257,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Unable to create deposit order",
+          message: "Unable to create deposit order",
         },
         { status: 500 }
       );
@@ -293,8 +267,7 @@ export async function POST(request: Request) {
     // CREATE PAY0 ORDER
     // ==========================================
 
-    const pay0Data =
-      new URLSearchParams();
+    const pay0Data = new URLSearchParams();
 
     pay0Data.append(
       "user_token",
@@ -326,29 +299,25 @@ export async function POST(request: Request) {
       "GamerzAdda Deposit"
     );
 
-    const pay0Response =
-      await fetch(
-        PAY0_CREATE_ORDER_URL,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/x-www-form-urlencoded",
-          },
-          body:
-            pay0Data.toString(),
-          cache: "no-store",
-        }
-      );
+    const pay0Response = await fetch(
+      PAY0_CREATE_ORDER_URL,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+        },
+        body: pay0Data.toString(),
+        cache: "no-store",
+      }
+    );
 
-    const pay0Text =
-      await pay0Response.text();
+    const pay0Text = await pay0Response.text();
 
     let pay0Result: any = null;
 
     try {
-      pay0Result =
-        JSON.parse(pay0Text);
+      pay0Result = JSON.parse(pay0Text);
     } catch {
       console.error(
         "Pay0 returned non-JSON response:",
@@ -366,10 +335,7 @@ export async function POST(request: Request) {
     // PAY0 ERROR
     // ==========================================
 
-    if (
-      !pay0Response.ok ||
-      !pay0Result
-    ) {
+    if (!pay0Response.ok || !pay0Result) {
       await supabaseAdmin
         .from("deposit_orders")
         .update({
@@ -380,8 +346,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Payment gateway error",
+          message: "Payment gateway error",
         },
         { status: 502 }
       );
@@ -447,8 +412,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: false,
-        message:
-          "Something went wrong",
+        message: "Something went wrong",
       },
       { status: 500 }
     );
