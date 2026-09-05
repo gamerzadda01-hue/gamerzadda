@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
 
 type Member = {
   id: string;
@@ -43,102 +42,26 @@ export default function MembersPage() {
     setError("");
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const response = await fetch("/api/admin/members", {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+      });
 
-      if (!user) {
-        setError("Admin login required.");
-        return;
+      const raw = await response.text();
+      let result: any = null;
+
+      try {
+        result = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(raw || "Unable to load members.");
       }
 
-      const { data: adminUser, error: adminError } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (adminError || adminUser?.role !== "admin") {
-        setError("Access denied. Admin only.");
-        return;
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to load members.");
       }
 
-      const { data, error: membersError } = await supabase
-        .from("users")
-        .select(
-          `
-          id,
-          full_name,
-          phone,
-          email,
-          free_fire_uid,
-          role,
-          created_at,
-          ip_address,
-          game_name,
-          status
-        `
-        )
-        .order("created_at", { ascending: false });
-
-      if (membersError) {
-        throw new Error(membersError.message);
-      }
-
-      const memberRows = (data || []) as Omit<
-        Member,
-        "wallet_total" | "last_wallet_activity"
-      >[];
-
-      const memberIds = memberRows.map((member) => member.id);
-
-      const walletMap: Record<string, number> = {};
-      const activityMap: Record<string, string | null> = {};
-
-      if (memberIds.length > 0) {
-        const { data: wallets, error: walletError } = await supabase
-          .from("wallet_balances")
-          .select(
-            "user_id, deposit_balance, bonus_balance, winning_balance"
-          )
-          .in("user_id", memberIds);
-
-        if (walletError) {
-          console.error("Wallet list error:", walletError);
-        }
-
-        (wallets || []).forEach((wallet: any) => {
-          walletMap[wallet.user_id] =
-            Number(wallet.deposit_balance || 0) +
-            Number(wallet.bonus_balance || 0) +
-            Number(wallet.winning_balance || 0);
-        });
-
-        const { data: transactions, error: transactionError } =
-          await supabase
-            .from("wallet_transactions")
-            .select("user_id, created_at")
-            .in("user_id", memberIds)
-            .order("created_at", { ascending: false });
-
-        if (transactionError) {
-          console.error("Wallet activity error:", transactionError);
-        }
-
-        (transactions || []).forEach((tx: any) => {
-          if (!activityMap[tx.user_id]) {
-            activityMap[tx.user_id] = tx.created_at;
-          }
-        });
-      }
-
-      setMembers(
-        memberRows.map((member) => ({
-          ...member,
-          wallet_total: walletMap[member.id] || 0,
-          last_wallet_activity: activityMap[member.id] || null,
-        }))
-      );
+      setMembers(result.members || []);
     } catch (err: any) {
       console.error(err);
       setError(err?.message || "Unable to load members.");
@@ -153,25 +76,32 @@ export default function MembersPage() {
     setWalletLoading(true);
 
     try {
-      const { data, error } = await supabase
-        .from("wallet_balances")
-        .select(
-          `
-          deposit_balance,
-          bonus_balance,
-          winning_balance
-        `
-        )
-        .eq("user_id", member.id)
-        .maybeSingle();
+      const response = await fetch(
+        `/api/admin/members?userId=${encodeURIComponent(member.id)}`,
+        {
+          method: "GET",
+          cache: "no-store",
+          credentials: "include",
+        }
+      );
 
-      if (error) {
-        console.error("Wallet error:", error);
+      const raw = await response.text();
+      let result: any = null;
+
+      try {
+        result = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(raw || "Unable to load wallet.");
       }
 
-      setWallet(data || null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to load wallet.");
+      }
+
+      setWallet(result.wallet || null);
     } catch (err) {
       console.error(err);
+      setWallet(null);
     } finally {
       setWalletLoading(false);
     }
