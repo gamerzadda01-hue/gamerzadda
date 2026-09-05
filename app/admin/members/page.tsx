@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 type Member = {
   id: string;
@@ -42,10 +43,19 @@ export default function MembersPage() {
     setError("");
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Admin login required.");
+      }
+
       const response = await fetch("/api/admin/members", {
         method: "GET",
         cache: "no-store",
         credentials: "include",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       const raw = await response.text();
@@ -76,12 +86,21 @@ export default function MembersPage() {
     setWalletLoading(true);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Admin login required.");
+      }
+
       const response = await fetch(
         `/api/admin/members?userId=${encodeURIComponent(member.id)}`,
         {
           method: "GET",
           cache: "no-store",
           credentials: "include",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
         }
       );
 

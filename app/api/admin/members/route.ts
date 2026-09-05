@@ -1,37 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
+function hashValue(value: string) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
 
 async function requireAdmin(request: NextRequest) {
+  // 1. Admin panel uses Supabase Auth. Prefer its Bearer token.
+  const authorization = request.headers.get("authorization") || "";
+  const bearerToken = authorization.startsWith("Bearer ")
+    ? authorization.slice(7).trim()
+    : "";
+
+  if (bearerToken) {
+    const { data, error } = await supabaseAdmin.auth.getUser(bearerToken);
+
+    if (!error && data?.user?.id) {
+      const { data: admin, error: adminError } = await supabaseAdmin
+        .from("users")
+        .select("role")
+        .eq("id", data.user.id)
+        .maybeSingle();
+
+      if (!adminError && admin?.role === "admin") {
+        return { ok: true, userId: data.user.id };
+      }
+
+      return { ok: false, error: "Access denied. Admin only." };
+    }
+  }
+
+  // 2. Keep compatibility with GamerzAdda custom session cookie.
   const token = request.cookies.get("gamerzadda_session")?.value;
 
   if (!token) {
-    return {
-      ok: false,
-      error: "Admin login required.",
-    };
+    return { ok: false, error: "Admin login required." };
   }
 
-  // IMPORTANT:
-  // user_sessions stores SHA-256 hash, not the raw session token.
-  const tokenHash = crypto
-    .createHash("sha256")
-    .update(decodeURIComponent(token))
-    .digest("hex");
+  let sessionToken = token;
+  try {
+    sessionToken = decodeURIComponent(token);
+  } catch {
+    // Use the original value if decoding fails.
+  }
+
+  const tokenHash = hashValue(sessionToken);
 
   const { data: session, error: sessionError } = await supabaseAdmin
     .from("user_sessions")
@@ -39,58 +56,25 @@ async function requireAdmin(request: NextRequest) {
     .eq("token_hash", tokenHash)
     .maybeSingle();
 
-  if (sessionError) {
-    console.error("Session lookup error:", sessionError);
-
-    return {
-      ok: false,
-      error: "Unable to verify session.",
-    };
+  if (sessionError || !session?.user_id) {
+    return { ok: false, error: "Invalid session." };
   }
 
-  if (!session?.user_id) {
-    return {
-      ok: false,
-      error: "Invalid session.",
-    };
-  }
-
-  if (
-    session.expires_at &&
-    new Date(session.expires_at).getTime() < Date.now()
-  ) {
-    return {
-      ok: false,
-      error: "Session expired.",
-    };
+  if (session.expires_at && new Date(session.expires_at) <= new Date()) {
+    return { ok: false, error: "Session expired." };
   }
 
   const { data: admin, error: adminError } = await supabaseAdmin
     .from("users")
-    .select("id, role")
+    .select("role")
     .eq("id", session.user_id)
     .maybeSingle();
 
-  if (adminError) {
-    console.error("Admin lookup error:", adminError);
-
-    return {
-      ok: false,
-      error: "Unable to verify admin account.",
-    };
+  if (adminError || admin?.role !== "admin") {
+    return { ok: false, error: "Access denied. Admin only." };
   }
 
-  if (admin?.role !== "admin") {
-    return {
-      ok: false,
-      error: "Access denied. Admin only.",
-    };
-  }
-
-  return {
-    ok: true,
-    adminId: session.user_id,
-  };
+  return { ok: true, userId: session.user_id };
 }
 
 export async function GET(request: NextRequest) {
@@ -99,132 +83,69 @@ export async function GET(request: NextRequest) {
 
     if (!auth.ok) {
       return NextResponse.json(
-        {
-          success: false,
-          error: auth.error,
-        },
-        {
-          status: 401,
-        }
+        { success: false, error: auth.error },
+        { status: 401 }
       );
     }
 
     const userId = request.nextUrl.searchParams.get("userId");
 
-    // --------------------------------------------------
-    // SINGLE MEMBER + WALLET
-    // --------------------------------------------------
+    // Detail request: return one member's wallet.
     if (userId) {
-      const { data: member, error: memberError } =
-        await supabaseAdmin
-          .from("users")
-          .select(
-            `
-            id,
-            full_name,
-            phone,
-            email,
-            free_fire_uid,
-            role,
-            created_at,
-            ip_address,
-            game_name,
-            status
-            `
-          )
-          .eq("id", userId)
-          .maybeSingle();
-
-      if (memberError) {
-        throw memberError;
-      }
-
-      if (!member) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Member not found.",
-          },
-          {
-            status: 404,
-          }
-        );
-      }
-
-      const { data: wallet, error: walletError } =
-        await supabaseAdmin
-          .from("wallet_balances")
-          .select(
-            "deposit_balance, bonus_balance, winning_balance"
-          )
-          .eq("user_id", userId)
-          .maybeSingle();
+      const { data: wallet, error: walletError } = await supabaseAdmin
+        .from("wallet_balances")
+        .select("deposit_balance, bonus_balance, winning_balance")
+        .eq("user_id", userId)
+        .maybeSingle();
 
       if (walletError) {
-        throw walletError;
+        console.error("Member wallet error:", walletError);
+        return NextResponse.json(
+          { success: false, error: "Unable to load wallet." },
+          { status: 500 }
+        );
       }
 
       return NextResponse.json({
         success: true,
-        member,
-        wallet: wallet || null,
+        wallet: wallet || {
+          deposit_balance: 0,
+          bonus_balance: 0,
+          winning_balance: 0,
+        },
       });
     }
 
-    // --------------------------------------------------
-    // ALL MEMBERS
-    // --------------------------------------------------
-    const { data: members, error: membersError } =
-      await supabaseAdmin
-        .from("users")
-        .select(
-          `
-          id,
-          full_name,
-          phone,
-          email,
-          free_fire_uid,
-          role,
-          created_at,
-          ip_address,
-          game_name,
-          status
-          `
-        )
-        .order("created_at", {
-          ascending: false,
-        });
+    // List all members.
+    const { data: users, error: usersError } = await supabaseAdmin
+      .from("users")
+      .select(
+        "id, full_name, phone, email, free_fire_uid, role, created_at, ip_address, game_name, status"
+      )
+      .order("created_at", { ascending: false });
 
-    if (membersError) {
-      throw membersError;
+    if (usersError) {
+      console.error("Members query error:", usersError);
+      return NextResponse.json(
+        { success: false, error: usersError.message },
+        { status: 500 }
+      );
     }
 
-    const rows = members || [];
-
-    const ids = rows.map((member) => member.id);
+    const memberRows = users || [];
+    const memberIds = memberRows.map((member) => member.id);
 
     const walletMap: Record<string, number> = {};
     const activityMap: Record<string, string | null> = {};
 
-    // --------------------------------------------------
-    // WALLET TOTALS
-    // --------------------------------------------------
-    if (ids.length > 0) {
-      const { data: wallets, error: walletError } =
-        await supabaseAdmin
-          .from("wallet_balances")
-          .select(
-            `
-            user_id,
-            deposit_balance,
-            bonus_balance,
-            winning_balance
-            `
-          )
-          .in("user_id", ids);
+    if (memberIds.length > 0) {
+      const { data: wallets, error: walletError } = await supabaseAdmin
+        .from("wallet_balances")
+        .select("user_id, deposit_balance, bonus_balance, winning_balance")
+        .in("user_id", memberIds);
 
       if (walletError) {
-        throw walletError;
+        console.error("Wallet list error:", walletError);
       }
 
       for (const wallet of wallets || []) {
@@ -234,20 +155,15 @@ export async function GET(request: NextRequest) {
           Number(wallet.winning_balance || 0);
       }
 
-      // --------------------------------------------------
-      // LAST WALLET ACTIVITY
-      // --------------------------------------------------
-      const { data: transactions, error: txError } =
+      const { data: transactions, error: transactionError } =
         await supabaseAdmin
           .from("wallet_transactions")
           .select("user_id, created_at")
-          .in("user_id", ids)
-          .order("created_at", {
-            ascending: false,
-          });
+          .in("user_id", memberIds)
+          .order("created_at", { ascending: false });
 
-      if (txError) {
-        throw txError;
+      if (transactionError) {
+        console.error("Wallet activity error:", transactionError);
       }
 
       for (const tx of transactions || []) {
@@ -257,39 +173,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // --------------------------------------------------
-    // FINAL MEMBER DATA
-    // --------------------------------------------------
-    const finalMembers = rows.map((member) => ({
+    const members = memberRows.map((member) => ({
       ...member,
-
-      wallet_total:
-        walletMap[member.id] || 0,
-
-      last_wallet_activity:
-        activityMap[member.id] || null,
+      wallet_total: walletMap[member.id] || 0,
+      last_wallet_activity: activityMap[member.id] || null,
     }));
 
-    return NextResponse.json({
-      success: true,
-      members: finalMembers,
-    });
-  } catch (error: any) {
-    console.error(
-      "Admin members API error:",
-      error
-    );
+    return NextResponse.json({ success: true, members });
+  } catch (error) {
+    console.error("Admin members API error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        error:
-          error?.message ||
-          "Unable to load members.",
-      },
-      {
-        status: 500,
-      }
+      { success: false, error: "Something went wrong." },
+      { status: 500 }
     );
   }
 }
