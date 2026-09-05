@@ -42,6 +42,47 @@ export default function AdminPage() {
   const [bonusPercent, setBonusPercent] = useState("10");
   const [settingsSaving, setSettingsSaving] = useState(false);
 
+  // ==========================================
+  // ADMIN DASHBOARD STATS
+  // ==========================================
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [stats, setStats] = useState({
+    users: 0,
+    deposits: 0,
+    pendingWithdrawals: 0,
+    tournaments: 0,
+    supportTickets: 0,
+    tournamentEntries: 0,
+  });
+
+  async function loadDashboardStats() {
+    setDashboardLoading(true);
+
+    const [users, deposits, withdrawals, tournaments, tickets, entries] =
+      await Promise.all([
+        supabase.from("users").select("id", { count: "exact", head: true }),
+        supabase.from("deposit_orders").select("id", { count: "exact", head: true }),
+        supabase
+          .from("withdraw_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending"),
+        supabase.from("tournaments").select("id", { count: "exact", head: true }),
+        supabase.from("support_tickets").select("id", { count: "exact", head: true }),
+        supabase.from("tournament_entries").select("id", { count: "exact", head: true }),
+      ]);
+
+    setStats({
+      users: users.count || 0,
+      deposits: deposits.count || 0,
+      pendingWithdrawals: withdrawals.count || 0,
+      tournaments: tournaments.count || 0,
+      supportTickets: tickets.count || 0,
+      tournamentEntries: entries.count || 0,
+    });
+
+    setDashboardLoading(false);
+  }
+
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -203,6 +244,7 @@ export default function AdminPage() {
     if (!checkingAdmin) {
       loadTournaments();
       loadWalletSettings();
+      loadDashboardStats();
     }
   }, [checkingAdmin]);
 
@@ -686,9 +728,37 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* WALLET SETTINGS */}
+        {/* ADMIN DASHBOARD */}
+        <section style={dashboardGrid}>
+          <StatCard icon="👥" label="Total Users" value={dashboardLoading ? "…" : stats.users} />
+          <StatCard icon="💳" label="Deposits" value={dashboardLoading ? "…" : stats.deposits} />
+          <StatCard icon="💸" label="Pending Withdrawals" value={dashboardLoading ? "…" : stats.pendingWithdrawals} />
+          <StatCard icon="🎮" label="Tournaments" value={dashboardLoading ? "…" : stats.tournaments} />
+          <StatCard icon="🎫" label="Support Tickets" value={dashboardLoading ? "…" : stats.supportTickets} />
+          <StatCard icon="🏆" label="Tournament Entries" value={dashboardLoading ? "…" : stats.tournamentEntries} />
+        </section>
 
         <div style={cardStyle}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px",flexWrap:"wrap"}}>
+            <div>
+              <h2 style={{marginTop:0,marginBottom:"5px"}}>⚡ Quick Admin Actions</h2>
+              <p style={{color:"#666",marginTop:0}}>Quick access to the main management sections.</p>
+            </div>
+            <button onClick={loadDashboardStats} style={statusButton}>🔄 Refresh Stats</button>
+          </div>
+          <div style={quickGrid}>
+            <QuickAction icon="👥" title="Users" description="View and manage users" target="#users" />
+            <QuickAction icon="💰" title="Deposits" description="Review deposit orders" target="#deposits" />
+            <QuickAction icon="💸" title="Withdrawals" description="Pending withdrawal queue" target="#withdrawals" />
+            <QuickAction icon="🎮" title="Tournaments" description="Create and manage tournaments" target="#tournaments" />
+            <QuickAction icon="🎫" title="Support" description="Handle user tickets" target="#support" />
+            <QuickAction icon="⚙️" title="Wallet Settings" description="Deposit bonus and limits" target="#wallet-settings" />
+          </div>
+        </div>
+
+        {/* WALLET SETTINGS */}
+
+        <div id="wallet-settings" style={cardStyle}>
           <h2 style={{ marginTop: 0 }}>💰 Wallet Settings</h2>
 
           <p
@@ -775,7 +845,7 @@ export default function AdminPage() {
         {/* CREATE / EDIT FORM */}
 
         {showForm && (
-          <div style={cardStyle}>
+          <div id="tournaments" style={cardStyle}>
             <div
               style={{
                 display: "flex",
@@ -1262,6 +1332,48 @@ export default function AdminPage() {
   );
 }
 
+function StatCard({
+  icon,
+  label,
+  value,
+}: {
+  icon: string;
+  label: string;
+  value: number | string;
+}) {
+  return (
+    <div style={statCardStyle}>
+      <div style={{fontSize:"28px"}}>{icon}</div>
+      <div>
+        <div style={{fontSize:"12px",color:"#777",marginBottom:"5px"}}>{label}</div>
+        <strong style={{fontSize:"24px"}}>{value}</strong>
+      </div>
+    </div>
+  );
+}
+
+function QuickAction({
+  icon,
+  title,
+  description,
+  target,
+}: {
+  icon: string;
+  title: string;
+  description: string;
+  target: string;
+}) {
+  return (
+    <a href={target} style={quickActionStyle}>
+      <span style={{fontSize:"25px"}}>{icon}</span>
+      <span>
+        <strong style={{display:"block",color:"#111"}}>{title}</strong>
+        <small style={{color:"#777"}}>{description}</small>
+      </span>
+    </a>
+  );
+}
+
 /* ==========================================
    TOURNAMENT CARD
 ========================================== */
@@ -1630,6 +1742,40 @@ function formatDateLocal(
 /* ==========================================
    STYLES
 ========================================== */
+
+const dashboardGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
+  gap: "14px",
+  marginTop: "25px",
+};
+
+const statCardStyle: React.CSSProperties = {
+  background: "#fff",
+  borderRadius: "12px",
+  padding: "18px",
+  display: "flex",
+  alignItems: "center",
+  gap: "14px",
+  boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+};
+
+const quickGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
+  gap: "12px",
+};
+
+const quickActionStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "12px",
+  padding: "15px",
+  border: "1px solid #e5e5e5",
+  borderRadius: "10px",
+  textDecoration: "none",
+  background: "#fff",
+};
 
 const cardStyle: React.CSSProperties = {
   background: "#fff",
