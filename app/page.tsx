@@ -6,33 +6,6 @@ import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-const fallbackBanners = [
-  {
-    title: "BOOYAH QUIZ",
-    subtitle: "FREE FIRE MAX QUESTIONS",
-    emoji: "❓",
-    gradient: "from-red-600 via-red-500 to-orange-400",
-  },
-  {
-    title: "FREE FIRE MAX",
-    subtitle: "PLAY HARD • WIN BIG",
-    emoji: "🔥",
-    gradient: "from-emerald-700 via-emerald-500 to-green-400",
-  },
-  {
-    title: "CLASH SQUAD",
-    subtitle: "ENTER THE BATTLE",
-    emoji: "⚔️",
-    gradient: "from-red-700 via-red-500 to-rose-400",
-  },
-  {
-    title: "WIN REAL CASH",
-    subtitle: "JOIN TOURNAMENTS & PLAY",
-    emoji: "💰",
-    gradient: "from-green-700 via-emerald-500 to-lime-400",
-  },
-];
-
 type DbBanner = {
   id: string;
   image_url: string;
@@ -94,7 +67,8 @@ export default function Home() {
   }, [activeNavIndex, draggingNav]);
   const [banner, setBanner] = useState(0);
   const [dbBanners, setDbBanners] = useState<DbBanner[]>([]);
-  const bannerCount = dbBanners.length > 0 ? dbBanners.length : fallbackBanners.length;
+  const [bannersLoading, setBannersLoading] = useState(true);
+  const bannerCount = dbBanners.length;
   const [loggingOut, setLoggingOut] = useState(false);
   const [profile, setProfile] = useState({
     name: "",
@@ -144,8 +118,15 @@ export default function Home() {
           setDbBanners((data || []) as DbBanner[]);
           setBanner(0);
         }
+
+        if (mounted) {
+          setBannersLoading(false);
+        }
       } catch (error) {
         console.error("Banner load error:", error);
+        if (mounted) {
+          setBannersLoading(false);
+        }
       }
     }
 
@@ -155,6 +136,14 @@ export default function Home() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (dbBanners.length === 0) {
+      setBanner(0);
+      return;
+    }
+    setBanner((current) => Math.min(current, dbBanners.length - 1));
+  }, [dbBanners.length]);
 
   // Automatic banner slider. Manual dots below still work.
   useEffect(() => {
@@ -226,7 +215,7 @@ export default function Home() {
               <button
                 onClick={() => setDrawer(true)}
                 aria-label="Open menu"
-                className="flex h-12 w-12 items-center justify-center rounded-[16px] flex items-center justify-center bg-[#641d3b]/80 text-2xl transition active:scale-90"
+                className="flex h-12 w-12 items-center justify-center rounded-[16px] bg-[#641d3b]/80 text-2xl transition active:scale-90"
               >
                 ☰
               </button>
@@ -242,7 +231,7 @@ export default function Home() {
               {/* NOTIFICATION */}
               <button
                 aria-label="Notifications"
-                className="relative flex h-12 w-12 items-center justify-center rounded-[16px] flex items-center justify-center bg-[#641d3b]/80 text-xl transition active:scale-90"
+                className="relative flex h-12 w-12 items-center justify-center rounded-[16px] bg-[#641d3b]/80 text-xl transition active:scale-90"
               >
                 🔔
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-300" />
@@ -252,7 +241,11 @@ export default function Home() {
             {/* BANNER INSIDE RED CURVE */}
             <section className="mt-3 -mx-1 overflow-hidden rounded-[26px] border border-white/30 bg-white/10 p-1.5 shadow-[0_12px_30px_rgba(100,29,59,0.28)] backdrop-blur-sm">
               <div className="overflow-hidden rounded-[20px]">
-                {dbBanners.length > 0 ? (
+                {bannersLoading ? (
+                  <div className="h-40 w-full animate-pulse bg-slate-200">
+                    <div className="h-full w-full bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200" />
+                  </div>
+                ) : dbBanners.length > 0 ? (
                   <button
                     type="button"
                     aria-label={`Open banner ${banner + 1}`}
@@ -267,34 +260,29 @@ export default function Home() {
                     }`}
                   >
                     <img
+                      key={dbBanners[banner].id}
                       src={dbBanners[banner].image_url}
                       alt={dbBanners[banner].title || "Gamerzadda banner"}
-                      className="h-full w-full object-cover"
+                      className="block h-full w-full object-cover"
+                      loading="eager"
+                      decoding="async"
+                      fetchPriority="high"
+                      referrerPolicy="no-referrer"
+                      onLoad={(e) => {
+                        e.currentTarget.style.opacity = "1";
+                      }}
                       onError={(e) => {
+                        console.error(
+                          "Banner image failed:",
+                          dbBanners[banner].image_url
+                        );
                         e.currentTarget.style.opacity = "0.35";
                       }}
                     />
                   </button>
                 ) : (
-                  <div
-                    className={`flex h-40 items-center justify-between bg-gradient-to-r ${fallbackBanners[banner].gradient} p-5 transition-all duration-500`}
-                  >
-                    <div>
-                      <p className="text-xs font-bold">THINK FAST. WIN BIG.</p>
-                      <h2 className="mt-1 text-4xl font-black italic">
-                        {fallbackBanners[banner].title}
-                      </h2>
-                      <p className="mt-2 text-xs font-bold">
-                        {fallbackBanners[banner].subtitle}
-                      </p>
-                      <button className="mt-2 rounded-xl bg-red-600 px-5 py-2 text-sm font-black shadow-lg transition active:scale-95">
-                        PLAY NOW »
-                      </button>
-                    </div>
-
-                    <div className="text-7xl">
-                      {fallbackBanners[banner].emoji}
-                    </div>
+                  <div className="flex h-40 items-center justify-center bg-slate-100 text-sm font-bold text-slate-500">
+                    No banners available
                   </div>
                 )}
               </div>
@@ -741,7 +729,7 @@ function DrawerGroup({
       <p className="mb-2 px-1 text-[10px] font-black tracking-[0.16em] text-emerald-600">
         {title}
       </p>
-      <div className="space-y-1 rounded-[16px] flex items-center justify-center border border-emerald-100/80 bg-slate-50/60 p-1">{children}</div>
+      <div className="space-y-1 rounded-[16px] border border-emerald-100/80 bg-slate-50/60 p-1">{children}</div>
     </div>
   );
 }
