@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 
 const banners = [
@@ -45,6 +46,18 @@ const menuItems = [
 
 export default function Home() {
   const [drawer, setDrawer] = useState(false);
+  const pathname = usePathname();
+
+  const activeNav =
+    pathname === "/scratch-card"
+      ? "Scratch"
+      : pathname === "/spin"
+        ? "Spin"
+        : pathname === "/leaderboard"
+          ? "Leaderboard"
+          : pathname === "/support"
+            ? "Support"
+            : "Home";
   const [banner, setBanner] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
   const [profile, setProfile] = useState({
@@ -52,7 +65,31 @@ export default function Home() {
     bio: "",
     avatarUrl: "",
   });
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const router = useRouter();
+
+  function handleTouchStart(e: React.TouchEvent) {
+    setTouchStartX(e.touches[0].clientX);
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (touchStartX === null) return;
+
+    const endX = e.changedTouches[0].clientX;
+    const distance = endX - touchStartX;
+
+    // Swipe from the right edge toward the left to open the menu.
+    if (!drawer && touchStartX > window.innerWidth - 40 && distance < -70) {
+      setDrawer(true);
+    }
+
+    // Swipe right while the drawer is open to close it.
+    if (drawer && distance > 70) {
+      setDrawer(false);
+    }
+
+    setTouchStartX(null);
+  }
 
   // Automatic banner slider. Manual dots below still work.
   useEffect(() => {
@@ -107,44 +144,43 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-white pb-24 text-slate-900">
+    <main
+      className="min-h-screen bg-white pb-24 text-slate-900"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       {/* HEADER + BANNER — one red curved scrolling section */}
       <div className="relative z-50">
         <div className="rounded-b-[34px] bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 pb-5 pt-4 shadow-xl">
           <div className="mx-auto max-w-md">
-            {/* FIXED BUTTONS ONLY */}
-            <div className="fixed left-0 right-0 top-0 z-[90] px-4 pt-4">
-              <div className="mx-auto flex max-w-md items-center justify-between">
-                {/* MENU */}
-                <button
-                  onClick={() => setDrawer(true)}
-                  aria-label="Open menu"
-                  className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-2xl transition active:scale-90"
-                >
-                  ☰
-                </button>
+            {/* HEADER BUTTONS — scroll together with the red header */}
+            <header className="flex items-center justify-between">
+              {/* MENU */}
+              <button
+                onClick={() => setDrawer(true)}
+                aria-label="Open menu"
+                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-2xl transition active:scale-90"
+              >
+                ☰
+              </button>
 
-                {/* WALLET */}
-                <button
-                  onClick={() => router.push("/wallet")}
-                  className="flex min-w-[130px] items-center justify-center gap-2 rounded-full bg-[#641d3b]/80 px-5 py-3 font-bold transition active:scale-95"
-                >
-                  💰 ₹0
-                </button>
+              {/* WALLET */}
+              <button
+                onClick={() => router.push("/wallet")}
+                className="flex min-w-[130px] items-center justify-center gap-2 rounded-full bg-[#641d3b]/80 px-5 py-3 font-bold transition active:scale-95"
+              >
+                💰 ₹0
+              </button>
 
-                {/* NOTIFICATION */}
-                <button
-                  aria-label="Notifications"
-                  className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-xl transition active:scale-90"
-                >
-                  🔔
-                  <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-300" />
-                </button>
-              </div>
-            </div>
-
-            {/* SPACE FOR FIXED BUTTONS */}
-            <div className="h-[48px]" />
+              {/* NOTIFICATION */}
+              <button
+                aria-label="Notifications"
+                className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-xl transition active:scale-90"
+              >
+                🔔
+                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-300" />
+              </button>
+            </header>
 
             {/* BANNER INSIDE RED CURVE */}
             <section className="mt-3 overflow-hidden rounded-[26px] border border-white/30 bg-white/10 p-1.5 shadow-[0_12px_30px_rgba(100,29,59,0.28)] backdrop-blur-sm">
@@ -259,43 +295,56 @@ export default function Home() {
         </section>
       </div>
 
-      {/* BOTTOM NAV — FIXED */}
-      <nav className="fixed bottom-3 left-1/2 z-40 w-[calc(100%-20px)] max-w-md -translate-x-1/2 rounded-[27px] border border-black/10 bg-white/70 px-2 py-2 shadow-[0_10px_35px_rgba(0,0,0,0.14)] backdrop-blur-2xl backdrop-saturate-150">
-        <div className="grid grid-cols-5 items-end">
-          <NavButton
+      {/* BOTTOM NAV — PREMIUM SLIDING ACTIVE PILL */}
+      <nav className="fixed bottom-3 left-1/2 z-40 w-[calc(100%-20px)] max-w-md -translate-x-1/2 rounded-[28px] border border-white/80 bg-white/80 px-2 py-2 shadow-[0_12px_40px_rgba(15,23,42,0.18)] backdrop-blur-2xl backdrop-saturate-150">
+        <div className="relative grid grid-cols-5 items-center gap-1">
+          {/* Sliding active background */}
+          <span
+            className={`pointer-events-none absolute bottom-1 top-1 w-[calc(20%_-_4px)] rounded-2xl bg-gradient-to-b from-red-50 to-pink-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_4px_12px_rgba(255,23,79,0.08)] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              activeNav === "Scratch"
+                ? "translate-x-0"
+                : activeNav === "Spin"
+                  ? "translate-x-full"
+                  : activeNav === "Home"
+                    ? "translate-x-[200%]"
+                    : activeNav === "Leaderboard"
+                      ? "translate-x-[300%]"
+                      : "translate-x-[400%]"
+            }`}
+          />
+
+          <PremiumNavButton
             icon="🎟️"
             text="Scratch"
+            active={activeNav === "Scratch"}
             onClick={() => router.push("/scratch-card")}
           />
 
-          <NavButton
+          <PremiumNavButton
             icon="🎡"
             text="Spin"
+            active={activeNav === "Spin"}
             onClick={() => router.push("/spin")}
           />
 
-          <button
+          <PremiumNavButton
+            icon="⌂"
+            text="Home"
+            active={activeNav === "Home"}
             onClick={() => router.push("/")}
-            aria-label="Home"
-            className="group flex flex-col items-center justify-end"
-          >
-            <span className="flex h-14 w-14 -translate-y-5 items-center justify-center rounded-full border-4 border-white/90 bg-gradient-to-br from-[#ff174f] to-[#ff4f70] text-2xl shadow-[0_8px_25px_rgba(255,23,79,0.45)] transition-transform duration-200 group-active:scale-90">
-              🏠
-            </span>
-            <span className="-mt-3 text-[10px] font-extrabold text-white">
-              Home
-            </span>
-          </button>
+          />
 
-          <NavButton
+          <PremiumNavButton
             icon="🏆"
             text="Leaderboard"
+            active={activeNav === "Leaderboard"}
             onClick={() => router.push("/leaderboard")}
           />
 
-          <NavButton
+          <PremiumNavButton
             icon="🎧"
             text="Support"
+            active={activeNav === "Support"}
             onClick={() => router.push("/support")}
           />
         </div>
@@ -451,7 +500,7 @@ function Tournament({
   );
 }
 
-function NavButton({
+function AnimatedNavButton({
   icon,
   text,
   onClick,
@@ -463,14 +512,78 @@ function NavButton({
   return (
     <button
       onClick={onClick}
-      className="group flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-slate-500 transition-all duration-200 active:scale-90"
+      className="group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-slate-500 transition-all duration-300 active:scale-90"
     >
-      <span className="flex h-7 w-7 items-center justify-center text-[20px] transition-transform duration-200 group-active:scale-90">
-        {icon}
+      {/* Sliding highlight */}
+      <span className="pointer-events-none absolute inset-x-2 top-1 h-8 -translate-y-1 rounded-xl bg-red-50 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-active:translate-y-0 group-active:opacity-100" />
+
+      {/* Animated icon */}
+      <span className="relative z-10 flex h-7 w-7 items-center justify-center text-[20px] transition-all duration-300 group-hover:-translate-y-1 group-hover:scale-110 group-active:scale-125">
+        <span className="animate-[navFloat_2.8s_ease-in-out_infinite] group-hover:animate-[navBounce_0.55s_ease-in-out_1]">
+          {icon}
+        </span>
       </span>
-      <span className="max-w-full truncate text-[9px] font-bold tracking-tight">
+
+      <span className="relative z-10 max-w-full truncate text-[9px] font-bold tracking-tight transition-all duration-300 group-hover:text-red-500">
         {text}
       </span>
+
+      {/* Slider dot */}
+      <span className="absolute bottom-0 h-1 w-1 rounded-full bg-red-500 opacity-0 transition-all duration-300 group-hover:w-5 group-hover:opacity-100 group-active:w-5 group-active:opacity-100" />
+    </button>
+  );
+}
+
+function PremiumNavButton({
+  icon,
+  text,
+  active,
+  onClick,
+}: {
+  icon: string;
+  text: string;
+  active: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`group relative z-10 flex h-[62px] min-w-0 flex-col items-center justify-center rounded-2xl px-1 transition-all duration-300 active:scale-90 ${
+        active ? "text-red-500" : "text-slate-500"
+      }`}
+    >
+      <span
+        className={`relative flex h-9 w-9 items-center justify-center rounded-[13px] text-[20px] transition-all duration-500 ${
+          active
+            ? "scale-110 bg-white shadow-[0_6px_18px_rgba(255,23,79,0.16)]"
+            : "bg-transparent group-hover:scale-110"
+        }`}
+      >
+        <span
+          className={
+            active
+              ? "animate-[navBounce_0.55s_ease-in-out_1]"
+              : "transition-transform duration-300 group-hover:-translate-y-1"
+          }
+        >
+          {icon}
+        </span>
+      </span>
+
+      <span
+        className={`relative z-10 mt-1 max-w-full truncate text-[9px] font-extrabold tracking-tight transition-all duration-300 ${
+          active ? "text-red-500" : "text-slate-500"
+        }`}
+      >
+        {text}
+      </span>
+
+      {/* Tiny sliding indicator */}
+      <span
+        className={`absolute bottom-0 h-1 rounded-full bg-gradient-to-r from-red-500 to-pink-500 transition-all duration-500 ${
+          active ? "w-5 opacity-100" : "w-1 opacity-0"
+        }`}
+      />
     </button>
   );
 }
@@ -500,3 +613,17 @@ function DrawerItem({ icon, text, onClick }: { icon: string; text: string; onCli
     </button>
   );
 }
+
+<style jsx global>{`
+  @keyframes navFloat {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-3px); }
+  }
+
+  @keyframes navBounce {
+    0% { transform: translateY(0) scale(1); }
+    35% { transform: translateY(-5px) scale(1.18); }
+    70% { transform: translateY(1px) scale(0.96); }
+    100% { transform: translateY(0) scale(1); }
+  }
+`}</style>
