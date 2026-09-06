@@ -313,64 +313,33 @@ export default function Home() {
             title="FREE FIRE"
             subtitle="PLAY HARD • WIN BIG"
             emoji="🔥"
+            onClick={() => router.push("/freefire")}
           />
 
           <GameCard
             title="FREE FIRE MAX"
             subtitle="BATTLE ARENA"
             emoji="🎮"
+            onClick={() => router.push("/freefiremax")}
           />
         </section>
 
-        {/* CLASH SQUAD */}
-        <section className="mt-3">
-          <div className="flex h-40 items-center justify-between overflow-hidden rounded-[16px] flex items-center justify-center bg-gradient-to-r from-pink-600 via-red-500 to-orange-400 p-5">
-            <div>
-              <p className="text-4xl font-black italic">CLASH</p>
-              <p className="text-4xl font-black text-yellow-300 italic">
-                SQUAD
-              </p>
-              <button className="mt-3 rounded-xl bg-red-700 px-5 py-2 text-sm font-black">
-                PLAY NOW »
-              </button>
-            </div>
-            <div className="text-7xl">⚔️</div>
-          </div>
-        </section>
-
-        {/* TOURNAMENTS */}
-        <section className="mt-2">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-xl font-extrabold text-slate-900">
-              🔥 Live Tournaments
-            </h2>
-            <button className="text-sm font-bold text-red-400">
-              View All
-            </button>
-          </div>
-
-          <Tournament
-            game="FREE FIRE MAX"
-            title="Booyah Battle"
-            prize="₹5,000"
-            entry="₹10"
-            players="42/50"
+        {/* CLASH SQUAD + LONEWOLF */}
+        <section className="mt-3 space-y-3">
+          <GameCard
+            title="CLASH SQUAD"
+            subtitle="ENTER THE BATTLE"
+            emoji="⚔️"
+            onClick={() => router.push("/clashsquad")}
+            wide
           />
 
-          <Tournament
-            game="FREE FIRE MAX"
-            title="Clash Squad"
-            prize="₹10,000"
-            entry="₹20"
-            players="86/100"
-          />
-
-          <Tournament
-            game="LUDO"
-            title="Ludo Cash Battle"
-            prize="₹1,000"
-            entry="₹5"
-            players="24/50"
+          <GameCard
+            title="LONEWOLF"
+            subtitle="1 VS 1 BATTLE"
+            emoji="🥷"
+            onClick={() => router.push("/lonewolf")}
+            wide
           />
         </section>
       </div>
@@ -551,6 +520,20 @@ export default function Home() {
           </aside>
         </div>
       )}
+      <style jsx global>{`
+        @keyframes navFloat {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-3px); }
+        }
+
+        @keyframes navBounce {
+          0% { transform: translateY(0) scale(1); }
+          35% { transform: translateY(-5px) scale(1.18); }
+          70% { transform: translateY(1px) scale(0.96); }
+          100% { transform: translateY(0) scale(1); }
+        }
+      `}</style>
+
     </main>
   );
 }
@@ -559,13 +542,23 @@ function GameCard({
   title,
   subtitle,
   emoji,
+  onClick,
+  wide = false,
 }: {
   title: string;
   subtitle: string;
   emoji: string;
+  onClick?: () => void;
+  wide?: boolean;
 }) {
   return (
-    <button className="relative h-40 overflow-hidden rounded-[16px] flex items-center justify-center border border-white/10 bg-gradient-to-br from-blue-700 to-cyan-500 p-4 text-left">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`relative w-full overflow-hidden rounded-[16px] border border-white/10 bg-gradient-to-br from-blue-700 to-cyan-500 p-4 text-left transition active:scale-[0.98] ${
+        wide ? "h-28" : "h-36"
+      }`}
+    >
       <div className="relative z-10">
         <h3 className="text-xl font-black">{title}</h3>
         <p className="mt-1 text-[9px] font-bold">{subtitle}</p>
@@ -575,49 +568,6 @@ function GameCard({
       </div>
       <div className="absolute -bottom-3 -right-2 text-7xl">{emoji}</div>
     </button>
-  );
-}
-
-function Tournament({
-  game,
-  title,
-  prize,
-  entry,
-  players,
-}: {
-  game: string;
-  title: string;
-  prize: string;
-  entry: string;
-  players: string;
-}) {
-  return (
-    <div className="mb-3 rounded-[16px] flex items-center justify-center border border-white/10 bg-[#11182b] p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[10px] font-bold text-red-400">{game}</p>
-          <h3 className="mt-1 font-black">{title}</h3>
-        </div>
-        <button className="rounded-xl bg-red-600 px-4 py-2 text-xs font-black">
-          JOIN
-        </button>
-      </div>
-
-      <div className="mt-2 grid grid-cols-3 text-center">
-        <div>
-          <p className="text-[10px] text-slate-400">PRIZE</p>
-          <p className="font-black text-green-400">{prize}</p>
-        </div>
-        <div>
-          <p className="text-[10px] text-slate-400">ENTRY</p>
-          <p className="font-black">{entry}</p>
-        </div>
-        <div>
-          <p className="text-[10px] text-slate-400">PLAYERS</p>
-          <p className="font-black">{players}</p>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -743,16 +693,4 @@ function DrawerItem({ icon, text, onClick }: { icon: string; text: string; onCli
   );
 }
 
-<style jsx global>{`
-  @keyframes navFloat {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-3px); }
-  }
 
-  @keyframes navBounce {
-    0% { transform: translateY(0) scale(1); }
-    35% { transform: translateY(-5px) scale(1.18); }
-    70% { transform: translateY(1px) scale(0.96); }
-    100% { transform: translateY(0) scale(1); }
-  }
-`}</style>

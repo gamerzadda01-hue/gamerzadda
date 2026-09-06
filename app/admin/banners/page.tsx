@@ -22,6 +22,7 @@ export default function AdminBannersPage() {
   const [clickUrl, setClickUrl] = useState("");
   const [title, setTitle] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
+  const [gameType, setGameType] = useState("home");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -177,6 +178,7 @@ export default function AdminBannersPage() {
         title: title.trim() || null,
         is_active: true,
         sort_order: Number(sortOrder) || 0,
+        game_type: gameType,
       });
 
       if (error) {
@@ -311,6 +313,23 @@ export default function AdminBannersPage() {
                   JPG, PNG, WEBP etc. • Maximum 2 MB
                 </p>
               </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Game
+              </label>
+              <select
+                value={gameType}
+                onChange={(e) => setGameType(e.target.value)}
+                className="w-full rounded-xl border border-slate-700 bg-[#080e17] px-4 py-3 text-sm outline-none focus:border-red-500"
+              >
+                <option value="home">Home</option>
+                <option value="freefire">Free Fire</option>
+                <option value="freefiremax">Free Fire MAX</option>
+                <option value="clashsquad">Clash Squad</option>
+                <option value="lonewolf">Lonewolf</option>
+              </select>
             </div>
 
             <div>

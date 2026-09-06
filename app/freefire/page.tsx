@@ -1,24 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-const banners = [
-  {
-    title: "FREE FIRE TOURNAMENT",
-    subtitle: "PLAY • COMPETE • WIN",
-    emoji: "🔥",
-  },
-  {
-    title: "BIG PRIZE POOLS",
-    subtitle: "JOIN YOUR FAVOURITE MATCH",
-    emoji: "🏆",
-  },
-  {
-    title: "FAST FREE FIRE MATCHES",
-    subtitle: "READY? LET'S BOOYAH!",
-    emoji: "⚡",
-  },
-];
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 const tournaments = [
   {
@@ -57,31 +41,76 @@ const tournaments = [
 ];
 
 export default function FreeFirePage() {
-  const [activeTab, setActiveTab] = useState("ALL");
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState("SOLO");
   const [banner, setBanner] = useState(0);
+  const [dbBanners, setDbBanners] = useState<
+    { id: string; image_url: string; click_url: string | null; title: string | null }[]
+  >([]);
+  const [bannersLoading, setBannersLoading] = useState(true);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+  const isSwiping = useRef(false);
 
-  // AUTO SLIDE
+  // LOAD FREE FIRE BANNERS
   useEffect(() => {
-    const timer = setInterval(() => {
-      setBanner((prev) => (prev + 1) % banners.length);
-    }, 3500);
+    async function loadBanners() {
+      setBannersLoading(true);
+      const { data, error } = await supabase
+        .from("banners")
+        .select("id,image_url,click_url,title")
+        .eq("is_active", true)
+        .eq("game_type", "freefire")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: false });
 
-    return () => clearInterval(timer);
+      if (error) {
+        console.error("Free Fire banners:", error);
+        setDbBanners([]);
+      } else {
+        setDbBanners(data || []);
+      }
+      setBanner(0);
+      setBannersLoading(false);
+    }
+
+    loadBanners();
   }, []);
+
+  useEffect(() => {
+    if (dbBanners.length <= 1) return;
+    const timer = setInterval(() => {
+      setBanner((prev) => (prev + 1) % dbBanners.length);
+    }, 3500);
+    return () => clearInterval(timer);
+  }, [dbBanners.length]);
 
   return (
     <main className="min-h-screen bg-[#f4f4f4] pb-20 text-black">
 
       {/* HEADER */}
-      <header className="sticky top-0 z-50 bg-gradient-to-r from-[#b90000] via-[#e00000] to-[#ff3030] px-4 py-3 text-white shadow-md">
+      <header className="sticky top-0 z-50 bg-[#ff174f] px-4 py-3 text-white shadow-md">
 
         <div className="flex items-center justify-between">
 
           <button
-            onClick={() => (window.location.href = "/")}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-2xl"
+            onClick={() => router.back()}
+            aria-label="Go back"
+            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-red-500 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
           >
-            ←
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </span>
           </button>
 
           <div className="text-center">
@@ -108,57 +137,91 @@ export default function FreeFirePage() {
 
       <section className="px-2.5 pt-2.5">
 
-        <div className="relative h-36 overflow-hidden rounded-2xl">
+        <div
+          className="relative h-36 overflow-hidden rounded-2xl touch-pan-y select-none"
+          onTouchStart={(e) => {
+            if (dbBanners.length <= 1) return;
+            touchStartX.current = e.touches[0].clientX;
+            touchStartY.current = e.touches[0].clientY;
+            isSwiping.current = false;
+          }}
+          onTouchMove={(e) => {
+            if (touchStartX.current === null || touchStartY.current === null) return;
+            const deltaX = e.touches[0].clientX - touchStartX.current;
+            const deltaY = e.touches[0].clientY - touchStartY.current;
+            if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > Math.abs(deltaY)) {
+              isSwiping.current = true;
+            }
+          }}
+          onTouchEnd={(e) => {
+            if (
+              dbBanners.length <= 1 ||
+              touchStartX.current === null ||
+              touchStartY.current === null
+            ) return;
 
-          {banners.map((item, index) => (
+            const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+            const deltaY = e.changedTouches[0].clientY - touchStartY.current;
+            const swipeThreshold = 45;
 
-            <div
-              key={index}
-              className={`absolute inset-0 transition-all duration-500 ${
-                index === banner
-                  ? "translate-x-0 opacity-100"
-                  : index < banner
-                  ? "-translate-x-full opacity-0"
-                  : "translate-x-full opacity-0"
-              }`}
-            >
+            if (Math.abs(deltaX) >= swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY)) {
+              if (deltaX < 0) {
+                setBanner((prev) => (prev + 1) % dbBanners.length);
+              } else {
+                setBanner((prev) => (prev - 1 + dbBanners.length) % dbBanners.length);
+              }
+            }
 
-              <div className="relative h-full overflow-hidden rounded-2xl bg-gradient-to-r from-[#8b0000] via-[#e00000] to-[#ff4b2b] p-5 text-white">
+            touchStartX.current = null;
+            touchStartY.current = null;
+            isSwiping.current = false;
+          }}
+        >
 
-                <div className="relative z-10">
-
-                  <p className="text-[10px] font-bold tracking-[2px] opacity-90">
-                    GAMERZADDA
-                  </p>
-
-                  <h2 className="mt-2 text-xl font-black leading-tight">
-                    {item.title}
-                  </h2>
-
-                  <p className="mt-1 text-[10px] font-bold">
-                    {item.subtitle}
-                  </p>
-
-                  <button className="mt-3 rounded-lg bg-white px-4 py-1.5 text-[10px] font-black text-red-600">
-                    PLAY NOW →
-                  </button>
-
-                </div>
-
-                <div className="absolute -right-2 -bottom-5 text-[100px]">
-                  {item.emoji}
-                </div>
-
-              </div>
-
+          {bannersLoading ? (
+            <div className="h-full w-full animate-pulse rounded-2xl bg-gray-200" />
+          ) : dbBanners.length === 0 ? (
+            <div className="flex h-full w-full items-center justify-center rounded-2xl bg-gray-200 text-xs font-bold text-gray-500">
+              No Free Fire banners available
             </div>
-
-          ))}
+          ) : (
+            <>
+              {dbBanners.map((item, index) => (
+                <div
+                  key={item.id}
+                  className={`absolute inset-0 transition-all duration-500 ${
+                    index === banner
+                      ? "translate-x-0 opacity-100"
+                      : index < banner
+                      ? "-translate-x-full opacity-0"
+                      : "translate-x-full opacity-0"
+                  }`}
+                >
+                  <a
+                    href={item.click_url || "#"}
+                    onClick={(e) => {
+                      if (!item.click_url) e.preventDefault();
+                    }}
+                    className="block h-full w-full"
+                  >
+                    <img
+                      src={item.image_url}
+                      alt={item.title || "Free Fire banner"}
+                      className="h-full w-full rounded-2xl object-cover"
+                      loading={index === 0 ? "eager" : "lazy"}
+                      decoding="async"
+                    />
+                  </a>
+                </div>
+              ))}
+            </>
+          )}
 
           {/* DOTS */}
+          {dbBanners.length > 1 && (
           <div className="absolute bottom-2 left-0 right-0 z-20 flex justify-center gap-1.5">
 
-            {banners.map((_, index) => (
+            {dbBanners.map((_, index) => (
               <button
                 key={index}
                 onClick={() => setBanner(index)}
@@ -171,6 +234,7 @@ export default function FreeFirePage() {
             ))}
 
           </div>
+          )}
 
         </div>
 
@@ -185,7 +249,7 @@ export default function FreeFirePage() {
 
     {/* SLIDING ACTIVE BACKGROUND */}
     <div
-      className={`absolute top-1 bottom-1 w-[calc(33.333%-2.67px)] rounded-lg bg-gradient-to-r from-red-600 to-red-500 shadow-md transition-all duration-300 ${
+      className={`absolute top-1 bottom-1 w-[calc(33.333%-2.67px)] rounded-lg bg-[#ff174f] shadow-md transition-all duration-300 ${
         activeTab === "SOLO"
           ? "left-1"
           : activeTab === "DUO"
@@ -260,7 +324,7 @@ export default function FreeFirePage() {
             icon="⌂"
             label="Home"
             active
-            onClick={() => (window.location.href = "/")}
+            onClick={() => { window.location.href = "/"; }}
           />
 
           <BottomButton
@@ -312,7 +376,7 @@ function TournamentCard({
 
       <div className="flex gap-2 px-3 pt-3 pb-2">
 
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-red-600 to-orange-500 text-lg">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#ff174f] text-lg">
           🔥
         </div>
 
@@ -375,7 +439,7 @@ function TournamentCard({
         <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
 
           <div
-            className="h-full rounded-full bg-gradient-to-r from-green-500 to-red-500"
+            className="h-full rounded-full bg-[#ff174f]"
             style={{
               width: `${percentage}%`,
             }}
@@ -418,7 +482,7 @@ function TournamentCard({
         onClick={() => {
           window.location.href = `/freefire/tournament/${tournamentId}`;
         }}
-        className="w-full bg-gradient-to-r from-[#b90000] to-[#ed0000] py-3 text-[13px] font-black tracking-wide text-white active:scale-[0.99]"
+        className="w-full bg-[#ff174f] py-3 text-[13px] font-black tracking-wide text-white active:scale-[0.99]"
       >
         VIEW →
       </button>
