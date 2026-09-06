@@ -110,7 +110,7 @@ export default function Home() {
     <main className="min-h-screen bg-white pb-24 text-slate-900">
       {/* CONNECTED HEADER + HERO */}
       <div className="sticky top-0 z-50">
-        <div className="bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 pb-6 pt-4 shadow-xl">
+        <div className="rounded-b-[32px] bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 pb-6 pt-4 shadow-xl">
           <div className="mx-auto max-w-md">
             <header className="flex items-center justify-between">
               <button
