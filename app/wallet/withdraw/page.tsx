@@ -1,486 +1,476 @@
+
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const MIN_WITHDRAWAL = 50;
-const SERVICE_CHARGE = 5;
+const banners = [
+  {
+    title: "BOOYAH QUIZ",
+    subtitle: "FREE FIRE MAX QUESTIONS",
+    emoji: "❓",
+    gradient: "from-red-600 via-red-500 to-orange-400",
+  },
+  {
+    title: "FREE FIRE MAX",
+    subtitle: "PLAY HARD • WIN BIG",
+    emoji: "🔥",
+    gradient: "from-emerald-700 via-emerald-500 to-green-400",
+  },
+  {
+    title: "CLASH SQUAD",
+    subtitle: "ENTER THE BATTLE",
+    emoji: "⚔️",
+    gradient: "from-red-700 via-red-500 to-rose-400",
+  },
+  {
+    title: "WIN REAL CASH",
+    subtitle: "JOIN TOURNAMENTS & PLAY",
+    emoji: "💰",
+    gradient: "from-green-700 via-emerald-500 to-lime-400",
+  },
+];
 
-type Wallet = {
-  deposit: number;
-  bonus: number;
-  winning: number;
-  total: number;
-};
+const menuItems = [
+  ["👤", "My Profile"],
+  ["💳", "My Wallet"],
+  ["🏆", "Leaderboard"],
+  ["👥", "My Referrals"],
+  ["📊", "My Stats"],
+  ["🎧", "Help Centre"],
+  ["⚙️", "Settings"],
+  ["🛡️", "Responsible Gaming"],
+  ["🎓", "Tutorial"],
+];
 
-export default function WithdrawPage() {
-  const router = useRouter();
-  const [wallet, setWallet] = useState<Wallet>({
-    deposit: 0,
-    bonus: 0,
-    winning: 0,
-    total: 0,
+export default function Home() {
+  const [drawer, setDrawer] = useState(false);
+  const [banner, setBanner] = useState(0);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [profile, setProfile] = useState({
+    name: "",
+    bio: "",
+    avatarUrl: "",
   });
+  const router = useRouter();
 
-  const [amount, setAmount] = useState("");
-  const [upiId, setUpiId] = useState("");
-  const [upiHolderName, setUpiHolderName] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-
+  // Automatic banner slider. Manual dots below still work.
   useEffect(() => {
-    loadWallet();
+    const timer = window.setInterval(() => {
+      setBanner((current) => (current + 1) % banners.length);
+    }, 4000);
+
+    return () => window.clearInterval(timer);
   }, []);
 
-  async function loadWallet() {
-    try {
-      setLoading(true);
-      setError("");
+  useEffect(() => {
+    let mounted = true;
 
-      const response = await fetch("/api/wallet", {
-        method: "GET",
-        cache: "no-store",
-      });
+    async function loadProfile() {
+      try {
+        const response = await fetch("/api/profile", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
 
-      const data = await response.json();
+        const result = await response.json();
 
-      if (!response.ok) {
-        setError(data.error || "Failed to load wallet.");
-        return;
-      }
-
-      setWallet(
-        data.wallet || {
-          deposit: 0,
-          bonus: 0,
-          winning: 0,
-          total: 0,
+        if (mounted && response.ok && result?.profile) {
+          setProfile({
+            name: result.profile.name || "",
+            bio: result.profile.bio || "",
+            avatarUrl: result.profile.avatarUrl || "",
+          });
         }
-      );
-    } catch {
-      setError("Unable to load wallet.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const numericAmount = Number(amount);
-
-  const receiveAmount = useMemo(() => {
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return 0;
-    }
-
-    return Math.max(0, numericAmount - SERVICE_CHARGE);
-  }, [numericAmount]);
-
-  function setQuickAmount(value: number) {
-    setAmount(String(value));
-    setError("");
-  }
-
-  function validateForm() {
-    const value = Number(amount);
-
-    if (!amount.trim() || !Number.isFinite(value)) {
-      return "Enter a valid withdrawal amount.";
-    }
-
-    if (value < MIN_WITHDRAWAL) {
-      return `Minimum withdrawal amount is ₹${MIN_WITHDRAWAL}.`;
-    }
-
-    if (Math.round(value * 100) !== value * 100) {
-      return "Amount can have maximum 2 decimal places.";
-    }
-
-    if (value > Number(wallet.winning || 0)) {
-      return "Insufficient winning balance.";
-    }
-
-    if (!upiHolderName.trim()) {
-      return "UPI holder name is required.";
-    }
-
-    if (upiHolderName.trim().length < 2) {
-      return "Enter a valid UPI holder name.";
-    }
-
-    if (!upiId.trim()) {
-      return "UPI ID is required.";
-    }
-
-    if (
-      !/^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+$/.test(
-        upiId.trim()
-      )
-    ) {
-      return "Enter a valid UPI ID.";
-    }
-
-    return "";
-  }
-
-  function handleWithdraw() {
-    setError("");
-
-    const validationError = validateForm();
-
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    setShowConfirm(true);
-  }
-
-  async function submitWithdrawal() {
-    setError("");
-
-    const validationError = validateForm();
-
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-
-      const response = await fetch("/api/wallet/withdraw", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          amount: numericAmount,
-          upiId: upiId.trim(),
-          upiHolderName: upiHolderName.trim(),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || "Withdrawal request failed.");
-        return;
+      } catch (error) {
+        console.error("Profile load error:", error);
       }
-
-      // Clear form
-      setAmount("");
-      setUpiId("");
-      setUpiHolderName("");
-
-      // Refresh wallet
-      await loadWallet();
-
-      // Show success popup
-      setShowSuccess(true);
-    } catch {
-      setError(
-        "Unable to submit withdrawal request. Please try again."
-      );
-    } finally {
-      setSubmitting(false);
     }
+
+    loadProfile();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  async function logout() {
+    if (loggingOut) return;
+    if (!window.confirm("Are you sure you want to logout?")) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch {}
+    try { localStorage.removeItem("gamerzadda_device_id"); } catch {}
+    router.replace("/login");
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f8f5] text-[#18221c]">
-      {/* HEADER */}
-      <header className="border-b border-[#dfe8e1] bg-white">
-        <div className="mx-auto flex h-14 max-w-xl items-center gap-3 px-4">
-          <button
-            onClick={() => router.back()}
-            aria-label="Go back"
-            className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
-          >
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
-              <svg
-                viewBox="0 0 24 24"
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+    <main className="min-h-screen bg-white pb-24 text-slate-900">
+      {/* CONNECTED HEADER + HERO */}
+      <div className="relative z-50">
+        <div className="rounded-b-[32px] bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 pb-6 pt-4 shadow-xl">
+          <div className="mx-auto max-w-md">
+            <header className="flex items-center justify-between">
+              <button
+                onClick={() => setDrawer(true)}
+                aria-label="Open menu"
+                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-2xl transition active:scale-90"
               >
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </span>
-          </button>
+                ☰
+              </button>
 
-          <h1 className="text-base font-extrabold">
-            Withdraw
-          </h1>
-        </div>
-      </header>
+              <button
+                onClick={() => router.push("/wallet")}
+                className="flex min-w-[130px] items-center justify-center gap-2 rounded-full bg-[#641d3b]/80 px-5 py-3 font-bold transition active:scale-95"
+              >
+                💰 ₹0
+              </button>
 
-      <div className="mx-auto max-w-xl px-4 py-5">
+              <button
+                aria-label="Notifications"
+                className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-xl transition active:scale-90"
+              >
+                🔔
+                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-300" />
+              </button>
+            </header>
 
-        {/* ERROR */}
-        {error && (
-          <div className="mb-4 rounded-xl border border-[#f1c1c1] bg-[#fff1f1] px-4 py-3 text-sm font-semibold text-[#c62828]">
-            {error}
-          </div>
-        )}
-
-        {/* BALANCE */}
-        <section className="rounded-2xl border border-[#cfe6d4] bg-[#edfaef] p-5">
-          <p className="text-xs font-semibold text-[#657169]">
-            Available Winning Balance
-          </p>
-
-          <div className="mt-1 text-3xl font-black text-[#193d24]">
-            {loading
-              ? "₹..."
-              : `₹${Number(
-                  wallet.winning || 0
-                ).toFixed(2)}`}
-          </div>
-
-          <p className="mt-1 text-[11px] text-[#718078]">
-            Only winning balance is withdrawable.
-          </p>
-        </section>
-
-        {/* FORM */}
-        <section className="mt-4 rounded-2xl border border-[#e0e6e1] bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-extrabold">
-            Withdraw Money
-          </h2>
-
-          {/* AMOUNT */}
-          <div className="mt-5">
-            <label className="mb-2 block text-xs font-bold text-[#465148]">
-              Amount
-            </label>
-
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-[#7b857d]">
-                ₹
-              </span>
-
-              <input
-                type="number"
-                inputMode="decimal"
-                min={MIN_WITHDRAWAL}
-                step="0.01"
-                value={amount}
-                onChange={(e) => {
-                  setAmount(e.target.value);
-                  setError("");
-                }}
-                placeholder="Enter amount"
-                className="w-full rounded-xl border border-[#dce3de] bg-[#fafcfb] py-3.5 pl-9 pr-3 font-bold outline-none focus:border-[#83c792] focus:ring-4 focus:ring-[#e4f5e7]"
-              />
-            </div>
-
-            <div className="mt-2 flex gap-2">
-              {[50, 100, 200, 500].map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setQuickAmount(value)}
-                  disabled={
-                    value >
-                    Number(wallet.winning || 0)
-                  }
-                  className="rounded-lg border border-[#dce5df] bg-[#f8faf8] px-3 py-2 text-[11px] font-bold text-[#536058] hover:bg-[#eff9f1] disabled:opacity-40"
+            {/* BANNER CONNECTED TO HEADER */}
+            <section className="mt-5 overflow-hidden rounded-[26px] border border-white/30 bg-white/10 p-1.5 shadow-[0_12px_30px_rgba(100,29,59,0.28)] backdrop-blur-sm">
+              <div className="overflow-hidden rounded-[20px]">
+                <div
+                  className={`flex h-44 items-center justify-between bg-gradient-to-r ${banners[banner].gradient} p-5 transition-all duration-500`}
                 >
-                  ₹{value}
-                </button>
-              ))}
-            </div>
-          </div>
+                  <div>
+                    <p className="text-xs font-bold">THINK FAST. WIN BIG.</p>
+                    <h2 className="mt-1 text-4xl font-black italic">
+                      {banners[banner].title}
+                    </h2>
+                    <p className="mt-2 text-xs font-bold">
+                      {banners[banner].subtitle}
+                    </p>
+                    <button className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-black shadow-lg transition active:scale-95">
+                      PLAY NOW »
+                    </button>
+                  </div>
 
-          {/* UPI */}
-          <div className="mt-4">
-            <label className="mb-2 block text-xs font-bold text-[#465148]">
-              UPI ID
-            </label>
-
-            <input
-              type="text"
-              value={upiId}
-              onChange={(e) => {
-                setUpiId(e.target.value);
-                setError("");
-              }}
-              placeholder="example@upi"
-              autoComplete="off"
-              className="w-full rounded-xl border border-[#dce3de] bg-[#fafcfb] px-4 py-3.5 font-semibold outline-none focus:border-[#83c792] focus:ring-4 focus:ring-[#e4f5e7]"
-            />
-          </div>
-
-          {/* UPI HOLDER NAME */}
-          <div className="mt-4">
-            <label className="mb-2 block text-xs font-bold text-[#465148]">
-              UPI Holder Name
-            </label>
-
-            <input
-              type="text"
-              value={upiHolderName}
-              onChange={(e) => {
-                setUpiHolderName(e.target.value);
-                setError("");
-              }}
-              placeholder="Enter UPI account holder name"
-              autoComplete="name"
-              className="w-full rounded-xl border border-[#dce3de] bg-[#fafcfb] px-4 py-3.5 font-semibold outline-none focus:border-[#83c792] focus:ring-4 focus:ring-[#e4f5e7]"
-            />
-          </div>
-
-          {/* BUTTON */}
-          <button
-            type="button"
-            onClick={handleWithdraw}
-            disabled={submitting || loading}
-            className="mt-4 w-full rounded-xl bg-[#d83232] py-3.5 text-sm font-extrabold text-white transition hover:bg-[#c92b2b] active:scale-[0.99] disabled:opacity-50"
-          >
-            {submitting
-              ? "Submitting..."
-              : "Withdraw"}
-          </button>
-
-        </section>
-      </div>
-
-      {/* CONFIRM WITHDRAWAL POPUP */}
-      {showConfirm && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-5 backdrop-blur-[2px]">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-2xl text-red-600">
-              💸
-            </div>
-
-            <h2 className="mt-4 text-center text-xl font-black text-[#18221c]">
-              Are you sure you want to withdraw?
-            </h2>
-
-            <div className="mt-4 rounded-2xl border border-emerald-100 bg-[#f7faf7] p-4">
-              <p className="mb-3 text-[10px] font-black uppercase tracking-wider text-[#89918b]">
-                Withdrawal Details
-              </p>
-
-              <div className="rounded-xl border border-emerald-100 bg-white px-3 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-[#747e76]">
-                    UPI Holder
-                  </span>
-                  <span className="max-w-[190px] truncate text-right text-sm font-black text-[#18221c]">
-                    {upiHolderName.trim()}
-                  </span>
-                </div>
-
-                <div className="mt-2 border-t border-[#edf1ed] pt-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs font-semibold text-[#747e76]">
-                      UPI ID
-                    </span>
-                    <span className="max-w-[190px] truncate text-right text-sm font-black text-[#18221c]">
-                      {upiId.trim()}
-                    </span>
+                  <div className="text-7xl">
+                    {banners[banner].emoji}
                   </div>
                 </div>
               </div>
+            </section>
 
-              <div className="mt-2 flex justify-between text-sm">
-                <span className="text-[#747e76]">Withdrawal Amount</span>
-                <span className="font-bold">
-                  ₹{Number(numericAmount || 0).toFixed(2)}
-                </span>
-              </div>
-
-              <div className="mt-2 flex justify-between text-sm">
-                <span className="text-[#747e76]">Service Charge</span>
-                <span className="font-bold text-[#d32f2f]">-₹5.00</span>
-              </div>
-
-              <div className="my-3 border-t border-[#e1e7e2]" />
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-extrabold">You&apos;ll Receive</span>
-                <span className="text-xl font-black text-[#25803c]">
-                  ₹{receiveAmount.toFixed(2)}
-                </span>
-              </div>
-
-              <div className="mt-3 rounded-xl bg-[#edfaef] px-3 py-2.5">
-                <p className="text-center text-[11px] font-bold leading-5 text-[#25803c]">
-                  Money will be credited to this UPI within 30 mins after processing.
-                </p>
-              </div>
+            <div className="mt-3 flex justify-center gap-2">
+              {banners.map((_, i) => (
+                <button
+                  key={i}
+                  aria-label={`Banner ${i + 1}`}
+                  onClick={() => setBanner(i)}
+                  className={`h-2 rounded-full transition-all ${
+                    banner === i ? "w-7 bg-white" : "w-2 bg-white/50"
+                  }`}
+                />
+              ))}
             </div>
-
-            <p className="mt-3 text-center text-[10px] font-semibold text-[#89918b]">
-              Please verify your UPI ID and amount before confirming.
-            </p>
-
-            <div className="flex items-center gap-3">
-<button
-                type="button"
-                onClick={() => setShowConfirm(false)}
-                disabled={submitting}
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 text-sm font-extrabold text-gray-700 transition hover:bg-gray-100 active:scale-[0.99] disabled:opacity-50"
-              >
-                Cancel
-              </button>
-<button
-                type="button"
-                onClick={async () => {
-                  setShowConfirm(false);
-                  await submitWithdrawal();
-                }}
-                disabled={submitting}
-                className="w-full rounded-xl bg-[#d83232] py-3 text-sm font-extrabold text-white transition hover:bg-[#c92b2b] active:scale-[0.99] disabled:opacity-50"
-              >
-                {submitting ? "Submitting..." : "Withdraw"}
-              </button>
-</div>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* SUCCESS POPUP */}
-      {showSuccess && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-5 backdrop-blur-[2px]">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl">
+      {/* APP CONTENT */}
+      <div className="mx-auto max-w-md bg-white px-4 pb-8">
+        {/* GAME CARDS */}
+        <section className="mt-5 grid grid-cols-2 gap-3">
+          <GameCard
+            title="FREE FIRE"
+            subtitle="PLAY HARD • WIN BIG"
+            emoji="🔥"
+          />
+          <GameCard
+            title="FREE FIRE MAX"
+            subtitle="BATTLE ARENA"
+            emoji="🎮"
+          />
+        </section>
 
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#e5f7e8] text-3xl text-[#25803c]">
-              ✓
+        <section className="mt-3">
+          <div className="flex h-44 items-center justify-between overflow-hidden rounded-2xl bg-gradient-to-r from-pink-600 via-red-500 to-orange-400 p-5">
+            <div>
+              <p className="text-4xl font-black italic">CLASH</p>
+              <p className="text-4xl font-black text-yellow-300 italic">
+                SQUAD
+              </p>
+              <button className="mt-3 rounded-xl bg-red-700 px-5 py-2 text-sm font-black">
+                PLAY NOW »
+              </button>
             </div>
+            <div className="text-7xl">⚔️</div>
+          </div>
+        </section>
 
-            <h2 className="mt-4 text-xl font-black text-[#18221c]">
-              Withdrawal Request Submitted
-            </h2>
+        {/* TOURNAMENTS */}
+        <section className="mt-8">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-extrabold text-slate-900">🔥 Live Tournaments</h2>
+            <button className="text-sm font-bold text-red-400">
+              View All
+            </button>
+          </div>
 
-            <p className="mt-2 text-sm leading-6 text-[#69746c]">
-              Your withdrawal request has been successfully
-              submitted.
-            </p>
+          <Tournament
+            game="FREE FIRE MAX"
+            title="Booyah Battle"
+            prize="₹5,000"
+            entry="₹10"
+            players="42/50"
+          />
 
-            <div className="mt-4 rounded-xl bg-[#edfaef] px-4 py-3">
-              <p className="text-sm font-bold text-[#25803c]">
-                Money will be credited in your bank UPI within 30 mins.
+          <Tournament
+            game="FREE FIRE MAX"
+            title="Clash Squad"
+            prize="₹10,000"
+            entry="₹20"
+            players="86/100"
+          />
+
+          <Tournament
+            game="LUDO"
+            title="Ludo Cash Battle"
+            prize="₹1,000"
+            entry="₹5"
+            players="24/50"
+          />
+        </section>
+      </div>
+
+      {/* BOTTOM NAV - iOS / TELEGRAM STYLE */}
+      <nav className="fixed bottom-3 left-1/2 z-40 w-[calc(100%-20px)] max-w-md -translate-x-1/2 rounded-[27px] border border-black/10 bg-white/70 px-2 py-2 shadow-[0_10px_35px_rgba(0,0,0,0.14)] backdrop-blur-2xl backdrop-saturate-150">
+        <div className="grid grid-cols-5 items-end">
+          <NavButton
+            icon="🎟️"
+            text="Scratch"
+            onClick={() => router.push("/scratch-card")}
+          />
+
+          <NavButton
+            icon="🎡"
+            text="Spin"
+            onClick={() => router.push("/spin")}
+          />
+
+          <button
+            onClick={() => router.push("/")}
+            aria-label="Home"
+            className="group flex flex-col items-center justify-end"
+          >
+            <span className="flex h-14 w-14 -translate-y-5 items-center justify-center rounded-full border-4 border-white/90 bg-gradient-to-br from-[#ff174f] to-[#ff4f70] text-2xl shadow-[0_8px_25px_rgba(255,23,79,0.45)] transition-transform duration-200 group-active:scale-90">
+              🏠
+            </span>
+            <span className="-mt-3 text-[10px] font-extrabold text-white">
+              Home
+            </span>
+          </button>
+
+          <NavButton
+            icon="🏆"
+            text="Leaderboard"
+            onClick={() => router.push("/leaderboard")}
+          />
+
+          <NavButton
+            icon="🎧"
+            text="Support"
+            onClick={() => router.push("/support")}
+          />
+        </div>
+      </nav>
+
+      {/* SIDE DRAWER */}
+      {drawer && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/60"
+          onClick={() => setDrawer(false)}
+        >
+          <aside
+            onClick={(e) => e.stopPropagation()}
+            className="h-full w-[min(88vw,360px)] max-w-[360px] overflow-y-auto bg-white text-slate-900 shadow-[12px_0_40px_rgba(15,23,42,0.22)] sm:w-[360px]"
+          >
+            {/* PROFILE HEADER */}
+            <div className="relative overflow-hidden rounded-br-[42px] bg-gradient-to-br from-[#ff174f] via-[#f21b4f] to-[#ff5b72] px-6 pb-8 pt-9 text-center text-white shadow-lg">
+              <div className="mx-auto h-[72px] w-[72px] overflow-hidden rounded-full border-[3px] border-white bg-white/20 shadow-xl ring-4 ring-white/10">
+                {profile.avatarUrl ? (
+                  <img
+                    src={profile.avatarUrl}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-3xl">
+                    👤
+                  </div>
+                )}
+              </div>
+
+              <h2 className="mt-3 text-lg font-black tracking-tight">
+                {profile.name || "Player"}
+              </h2>
+              <p className="mx-auto mt-1 max-w-[250px] truncate text-[13px] font-medium text-white/90">
+                {profile.bio || "Welcome back"}
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowSuccess(false)}
-              className="mt-5 w-full rounded-xl bg-[#d83232] py-3 text-sm font-extrabold text-white hover:bg-[#c92b2b]"
-            >
-              Done
-            </button>
-          </div>
+            <div className="bg-white px-5 py-6">
+              <DrawerGroup title="ACCOUNT">
+                <DrawerItem icon="👤" text="My Profile" onClick={() => router.push("/profile")} />
+              </DrawerGroup>
+
+              <DrawerGroup title="FINANCE">
+                <DrawerItem icon="💳" text="My Wallet" onClick={() => router.push("/wallet")} />
+              </DrawerGroup>
+
+              <DrawerGroup title="GAMING">
+                <DrawerItem icon="🏆" text="Leaderboard" />
+                <DrawerItem icon="📊" text="My Stats" />
+              </DrawerGroup>
+
+              <DrawerGroup title="SUPPORT & SETTINGS">
+                <DrawerItem icon="⚙️" text="Settings" onClick={() => router.push("/settings")} />
+                <DrawerItem icon="🛡️" text="Responsible Gaming" />
+                <DrawerItem icon="🎓" text="Tutorial" />
+              </DrawerGroup>
+
+              <DrawerGroup title="COMMUNITY">
+                <DrawerItem icon="➤" text="Telegram" />
+                <DrawerItem icon="📷" text="Instagram" />
+                <DrawerItem icon="💬" text="WhatsApp" />
+                <DrawerItem icon="▶️" text="YouTube" />
+              </DrawerGroup>
+
+              <p className="mt-8 rounded-xl bg-emerald-50 py-3 text-center font-bold text-emerald-700">
+                Gamerz<span className="text-red-500">Adda</span>
+              </p>
+            </div>
+          </aside>
         </div>
       )}
     </main>
+  );
+}
+
+function GameCard({
+  title,
+  subtitle,
+  emoji,
+}: {
+  title: string;
+  subtitle: string;
+  emoji: string;
+}) {
+  return (
+    <button className="relative h-44 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-blue-700 to-cyan-500 p-4 text-left">
+      <div className="relative z-10">
+        <h3 className="text-xl font-black">{title}</h3>
+        <p className="mt-1 text-[9px] font-bold">{subtitle}</p>
+        <span className="mt-12 inline-block rounded-lg bg-red-600 px-3 py-2 text-xs font-black">
+          PLAY NOW »
+        </span>
+      </div>
+      <div className="absolute -bottom-3 -right-2 text-7xl">{emoji}</div>
+    </button>
+  );
+}
+
+function Tournament({
+  game,
+  title,
+  prize,
+  entry,
+  players,
+}: {
+  game: string;
+  title: string;
+  prize: string;
+  entry: string;
+  players: string;
+}) {
+  return (
+    <div className="mb-3 rounded-2xl border border-white/10 bg-[#11182b] p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[10px] font-bold text-red-400">{game}</p>
+          <h3 className="mt-1 font-black">{title}</h3>
+        </div>
+        <button className="rounded-xl bg-red-600 px-4 py-2 text-xs font-black">
+          JOIN
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 text-center">
+        <div>
+          <p className="text-[10px] text-slate-400">PRIZE</p>
+          <p className="font-black text-green-400">{prize}</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-slate-400">ENTRY</p>
+          <p className="font-black">{entry}</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-slate-400">PLAYERS</p>
+          <p className="font-black">{players}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NavButton({
+  icon,
+  text,
+  onClick,
+}: {
+  icon: string;
+  text: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="group flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-slate-500 transition-all duration-200 active:scale-90"
+    >
+      <span className="flex h-7 w-7 items-center justify-center text-[20px] transition-transform duration-200 group-active:scale-90">
+        {icon}
+      </span>
+      <span className="max-w-full truncate text-[9px] font-bold tracking-tight">
+        {text}
+      </span>
+    </button>
+  );
+}
+
+function DrawerGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-6">
+      <p className="mb-2 px-1 text-[10px] font-black tracking-[0.16em] text-emerald-600">
+        {title}
+      </p>
+      <div className="space-y-1 rounded-2xl border border-emerald-100/80 bg-slate-50/60 p-1">{children}</div>
+    </div>
+  );
+}
+
+function DrawerItem({ icon, text, onClick }: { icon: string; text: string; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} className="group flex min-h-[50px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 transition-all hover:bg-emerald-50 hover:text-red-500 active:scale-[0.98]">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-lg shadow-sm ring-1 ring-emerald-100 transition group-hover:bg-red-50 group-hover:ring-red-100">{icon}</span>
+      <span>{text}</span>
+    </button>
   );
 }
