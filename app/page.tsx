@@ -9,16 +9,25 @@ const banners = [
     title: "BOOYAH QUIZ",
     subtitle: "FREE FIRE MAX QUESTIONS",
     emoji: "❓",
+    gradient: "from-red-600 via-red-500 to-orange-400",
   },
   {
     title: "FREE FIRE MAX",
     subtitle: "PLAY HARD • WIN BIG",
     emoji: "🔥",
+    gradient: "from-emerald-700 via-emerald-500 to-green-400",
   },
   {
     title: "CLASH SQUAD",
     subtitle: "ENTER THE BATTLE",
     emoji: "⚔️",
+    gradient: "from-red-700 via-red-500 to-rose-400",
+  },
+  {
+    title: "WIN REAL CASH",
+    subtitle: "JOIN TOURNAMENTS & PLAY",
+    emoji: "💰",
+    gradient: "from-green-700 via-emerald-500 to-lime-400",
   },
 ];
 
@@ -44,6 +53,15 @@ export default function Home() {
     avatarUrl: "",
   });
   const router = useRouter();
+
+  // Automatic banner slider. Manual dots below still work.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setBanner((current) => (current + 1) % banners.length);
+    }, 4000);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -89,66 +107,80 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070b18] text-white">
-      {/* TOP HEADER */}
-      <header className="sticky top-0 z-50 bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 pb-5 pt-4 shadow-xl">
-        <div className="mx-auto flex max-w-md items-center justify-between">
-          <button
-            onClick={() => setDrawer(true)}
-            className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-2xl"
-          >
-            ☰
-          </button>
+    <main className="min-h-screen bg-white pb-24 text-slate-900">
+      {/* CONNECTED HEADER + HERO */}
+      <div className="sticky top-0 z-50">
+        <div className="bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 pb-6 pt-4 shadow-xl">
+          <div className="mx-auto max-w-md">
+            <header className="flex items-center justify-between">
+              <button
+                onClick={() => setDrawer(true)}
+                aria-label="Open menu"
+                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-2xl transition active:scale-90"
+              >
+                ☰
+              </button>
 
-          <button className="flex min-w-[130px] items-center justify-center gap-2 rounded-full bg-[#641d3b]/80 px-5 py-3 font-bold">
-            💰 ₹0
-          </button>
+              <button
+                onClick={() => router.push("/wallet")}
+                className="flex min-w-[130px] items-center justify-center gap-2 rounded-full bg-[#641d3b]/80 px-5 py-3 font-bold transition active:scale-95"
+              >
+                💰 ₹0
+              </button>
 
-          <button className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-xl">
-            🔔
-          </button>
+              <button
+                aria-label="Notifications"
+                className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-xl transition active:scale-90"
+              >
+                🔔
+                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-300" />
+              </button>
+            </header>
+
+            {/* BANNER CONNECTED TO HEADER */}
+            <section className="mt-5 overflow-hidden rounded-[26px] border border-white/30 bg-white/10 p-1.5 shadow-[0_12px_30px_rgba(100,29,59,0.28)] backdrop-blur-sm">
+              <div className="overflow-hidden rounded-[20px]">
+                <div
+                  className={`flex h-44 items-center justify-between bg-gradient-to-r ${banners[banner].gradient} p-5 transition-all duration-500`}
+                >
+                  <div>
+                    <p className="text-xs font-bold">THINK FAST. WIN BIG.</p>
+                    <h2 className="mt-1 text-4xl font-black italic">
+                      {banners[banner].title}
+                    </h2>
+                    <p className="mt-2 text-xs font-bold">
+                      {banners[banner].subtitle}
+                    </p>
+                    <button className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-black shadow-lg transition active:scale-95">
+                      PLAY NOW »
+                    </button>
+                  </div>
+
+                  <div className="text-7xl">
+                    {banners[banner].emoji}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div className="mt-3 flex justify-center gap-2">
+              {banners.map((_, i) => (
+                <button
+                  key={i}
+                  aria-label={`Banner ${i + 1}`}
+                  onClick={() => setBanner(i)}
+                  className={`h-2 rounded-full transition-all ${
+                    banner === i ? "w-7 bg-white" : "w-2 bg-white/50"
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
         </div>
-      </header>
+      </div>
 
       {/* APP CONTENT */}
-      <div className="mx-auto max-w-md px-4 pb-28">
-        <h1 className="mb-4 mt-6 text-center text-2xl font-extrabold">
-          Discover upcoming matches
-        </h1>
-
-        {/* BANNER */}
-        <section className="relative overflow-hidden rounded-2xl border border-white/10">
-          <div className="flex h-44 items-center justify-between bg-gradient-to-r from-blue-700 via-blue-500 to-cyan-400 p-5">
-            <div>
-              <p className="text-xs font-bold">THINK FAST. WIN BIG.</p>
-              <h2 className="mt-1 text-4xl font-black italic">
-                {banners[banner].title}
-              </h2>
-              <p className="mt-2 text-xs font-bold">
-                {banners[banner].subtitle}
-              </p>
-              <button className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-black shadow-lg">
-                PLAY NOW »
-              </button>
-            </div>
-
-            <div className="text-7xl">{banners[banner].emoji}</div>
-          </div>
-        </section>
-
-        {/* DOTS */}
-        <div className="mt-3 flex justify-center gap-2">
-          {banners.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setBanner(i)}
-              className={`h-2 rounded-full transition-all ${
-                banner === i ? "w-7 bg-red-500" : "w-2 bg-zinc-600"
-              }`}
-            />
-          ))}
-        </div>
-
+      <div className="mx-auto max-w-md bg-white px-4 pb-8">
         {/* GAME CARDS */}
         <section className="mt-5 grid grid-cols-2 gap-3">
           <GameCard
@@ -181,7 +213,7 @@ export default function Home() {
         {/* TOURNAMENTS */}
         <section className="mt-8">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xl font-extrabold">🔥 Live Tournaments</h2>
+            <h2 className="text-xl font-extrabold text-slate-900">🔥 Live Tournaments</h2>
             <button className="text-sm font-bold text-red-400">
               View All
             </button>
@@ -213,15 +245,46 @@ export default function Home() {
         </section>
       </div>
 
-      {/* BOTTOM NAV */}
-      <nav className="fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-32px)] max-w-md -translate-x-1/2 items-center justify-around rounded-3xl border border-white/10 bg-[#18233b]/95 px-3 py-3 shadow-2xl backdrop-blur-xl">
-        <NavButton icon="🏆" text="Games" />
-        <NavButton icon="🌐" text="Tournaments" />
-        <button className="flex h-14 w-14 -translate-y-5 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-pink-500 text-2xl shadow-xl shadow-red-500/30">
-          🏠
-        </button>
-        <NavButton icon="🎧" text="Support" />
-        <NavButton icon="👤" text="Profile" />
+      {/* BOTTOM NAV - iOS / TELEGRAM STYLE */}
+      <nav className="fixed bottom-3 left-1/2 z-40 w-[calc(100%-20px)] max-w-md -translate-x-1/2 rounded-[27px] border border-black/10 bg-white/70 px-2 py-2 shadow-[0_10px_35px_rgba(0,0,0,0.14)] backdrop-blur-2xl backdrop-saturate-150">
+        <div className="grid grid-cols-5 items-end">
+          <NavButton
+            icon="🎟️"
+            text="Scratch"
+            onClick={() => router.push("/scratch-card")}
+          />
+
+          <NavButton
+            icon="🎡"
+            text="Spin"
+            onClick={() => router.push("/spin")}
+          />
+
+          <button
+            onClick={() => router.push("/")}
+            aria-label="Home"
+            className="group flex flex-col items-center justify-end"
+          >
+            <span className="flex h-14 w-14 -translate-y-5 items-center justify-center rounded-full border-4 border-white/90 bg-gradient-to-br from-[#ff174f] to-[#ff4f70] text-2xl shadow-[0_8px_25px_rgba(255,23,79,0.45)] transition-transform duration-200 group-active:scale-90">
+              🏠
+            </span>
+            <span className="-mt-3 text-[10px] font-extrabold text-white">
+              Home
+            </span>
+          </button>
+
+          <NavButton
+            icon="🏆"
+            text="Leaderboard"
+            onClick={() => router.push("/leaderboard")}
+          />
+
+          <NavButton
+            icon="🎧"
+            text="Support"
+            onClick={() => router.push("/support")}
+          />
+        </div>
       </nav>
 
       {/* SIDE DRAWER */}
@@ -346,15 +409,15 @@ function Tournament({
 
       <div className="mt-4 grid grid-cols-3 text-center">
         <div>
-          <p className="text-[10px] text-zinc-500">PRIZE</p>
+          <p className="text-[10px] text-slate-400">PRIZE</p>
           <p className="font-black text-green-400">{prize}</p>
         </div>
         <div>
-          <p className="text-[10px] text-zinc-500">ENTRY</p>
+          <p className="text-[10px] text-slate-400">ENTRY</p>
           <p className="font-black">{entry}</p>
         </div>
         <div>
-          <p className="text-[10px] text-zinc-500">PLAYERS</p>
+          <p className="text-[10px] text-slate-400">PLAYERS</p>
           <p className="font-black">{players}</p>
         </div>
       </div>
@@ -362,11 +425,26 @@ function Tournament({
   );
 }
 
-function NavButton({ icon, text }: { icon: string; text: string }) {
+function NavButton({
+  icon,
+  text,
+  onClick,
+}: {
+  icon: string;
+  text: string;
+  onClick?: () => void;
+}) {
   return (
-    <button className="flex flex-col items-center gap-1 text-[10px] font-bold text-zinc-300">
-      <span className="text-xl">{icon}</span>
-      {text}
+    <button
+      onClick={onClick}
+      className="group flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-slate-500 transition-all duration-200 active:scale-90"
+    >
+      <span className="flex h-7 w-7 items-center justify-center text-[20px] transition-transform duration-200 group-active:scale-90">
+        {icon}
+      </span>
+      <span className="max-w-full truncate text-[9px] font-bold tracking-tight">
+        {text}
+      </span>
     </button>
   );
 }
