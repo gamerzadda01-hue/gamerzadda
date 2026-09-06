@@ -58,6 +58,30 @@ export default function Home() {
           : pathname === "/support"
             ? "Support"
             : "Home";
+
+  const navItems = [
+    { key: "Scratch", path: "/scratch-card" },
+    { key: "Spin", path: "/spin" },
+    { key: "Home", path: "/" },
+    { key: "Leaderboard", path: "/leaderboard" },
+    { key: "Support", path: "/support" },
+  ];
+
+  const activeNavIndex = Math.max(
+    0,
+    navItems.findIndex((item) => item.key === activeNav)
+  );
+  const [draggingNav, setDraggingNav] = useState(false);
+  const [dragIndex, setDragIndex] = useState(activeNavIndex);
+  const [dragPosition, setDragPosition] = useState(activeNavIndex);
+  const [navStartX, setNavStartX] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!draggingNav) {
+      setDragIndex(activeNavIndex);
+      setDragPosition(activeNavIndex);
+    }
+  }, [activeNavIndex, draggingNav]);
   const [banner, setBanner] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
   const [profile, setProfile] = useState({
@@ -295,58 +319,99 @@ export default function Home() {
         </section>
       </div>
 
-      {/* BOTTOM NAV — PREMIUM SLIDING ACTIVE PILL */}
+      {/* BOTTOM NAV — ULTRA SMOOTH DRAG SLIDER */}
       <nav className="fixed bottom-3 left-1/2 z-40 w-[calc(100%-20px)] max-w-md -translate-x-1/2 rounded-[28px] border border-white/80 bg-white/80 px-2 py-2 shadow-[0_12px_40px_rgba(15,23,42,0.18)] backdrop-blur-2xl backdrop-saturate-150">
-        <div className="relative grid grid-cols-5 items-center gap-1">
-          {/* Sliding active background */}
+        <div
+          className="relative grid grid-cols-5 items-center gap-1 touch-pan-y select-none"
+          onTouchStart={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.touches[0].clientX - rect.left;
+            const slot = rect.width / 5;
+            const position = Math.max(0, Math.min(4, x / slot - 0.5));
+
+            setDraggingNav(true);
+            setNavStartX(e.touches[0].clientX);
+            setDragPosition(position);
+            setDragIndex(Math.round(position));
+          }}
+          onTouchMove={(e) => {
+            if (navStartX === null) return;
+
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.touches[0].clientX - rect.left;
+            const slot = rect.width / 5;
+            const position = Math.max(0, Math.min(4, x / slot - 0.5));
+
+            setDragPosition(position);
+            setDragIndex(Math.round(position));
+          }}
+          onTouchEnd={() => {
+            const next = navItems[dragIndex];
+            setDraggingNav(false);
+            setNavStartX(null);
+            setDragPosition(dragIndex);
+
+            if (next) router.push(next.path);
+          }}
+          onMouseDown={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const slot = rect.width / 5;
+            const position = Math.max(0, Math.min(4, x / slot - 0.5));
+
+            setDraggingNav(true);
+            setNavStartX(e.clientX);
+            setDragPosition(position);
+            setDragIndex(Math.round(position));
+          }}
+          onMouseMove={(e) => {
+            if (!draggingNav || navStartX === null) return;
+
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const slot = rect.width / 5;
+            const position = Math.max(0, Math.min(4, x / slot - 0.5));
+
+            setDragPosition(position);
+            setDragIndex(Math.round(position));
+          }}
+          onMouseUp={() => {
+            if (!draggingNav) return;
+
+            const next = navItems[dragIndex];
+            setDraggingNav(false);
+            setNavStartX(null);
+            setDragPosition(dragIndex);
+
+            if (next) router.push(next.path);
+          }}
+          onMouseLeave={() => {
+            if (!draggingNav) return;
+
+            setDraggingNav(false);
+            setNavStartX(null);
+            setDragPosition(activeNavIndex);
+            setDragIndex(activeNavIndex);
+          }}
+        >
+          {/* SMOOTH SLIDING PILL */}
           <span
-            className={`pointer-events-none absolute bottom-1 top-1 w-[calc(20%_-_4px)] rounded-2xl bg-gradient-to-b from-red-50 to-pink-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_4px_12px_rgba(255,23,79,0.08)] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-              activeNav === "Scratch"
-                ? "translate-x-0"
-                : activeNav === "Spin"
-                  ? "translate-x-full"
-                  : activeNav === "Home"
-                    ? "translate-x-[200%]"
-                    : activeNav === "Leaderboard"
-                      ? "translate-x-[300%]"
-                      : "translate-x-[400%]"
+            className={`pointer-events-none absolute bottom-1 top-1 w-[calc(20%_-_4px)] rounded-2xl bg-gradient-to-b from-red-50 via-pink-50 to-white shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_5px_16px_rgba(255,23,79,0.12)] ${
+              draggingNav
+                ? "scale-[1.03] transition-transform duration-75"
+                : "transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
             }`}
+            style={{
+              transform: `translate3d(calc(${dragPosition * 100}% + ${dragPosition * 4}px), 0, 0)`,
+              willChange: "transform",
+            }}
           />
 
-          <PremiumNavButton
-            icon="🎟️"
-            text="Scratch"
-            active={activeNav === "Scratch"}
-            onClick={() => router.push("/scratch-card")}
-          />
-
-          <PremiumNavButton
-            icon="🎡"
-            text="Spin"
-            active={activeNav === "Spin"}
-            onClick={() => router.push("/spin")}
-          />
-
-          <PremiumNavButton
-            icon="⌂"
-            text="Home"
-            active={activeNav === "Home"}
-            onClick={() => router.push("/")}
-          />
-
-          <PremiumNavButton
-            icon="🏆"
-            text="Leaderboard"
-            active={activeNav === "Leaderboard"}
-            onClick={() => router.push("/leaderboard")}
-          />
-
-          <PremiumNavButton
-            icon="🎧"
-            text="Support"
-            active={activeNav === "Support"}
-            onClick={() => router.push("/support")}
-          />
+          <PremiumNavButton icon="scratch" text="Scratch" active={dragIndex === 0} iconClass="text-[#ff174f]" />
+          <PremiumNavButton icon="scratch" text="Spin" active={dragIndex === 1} iconClass="text-[#18a957]" />
+          <PremiumNavButton icon="home" text="Home" active={dragIndex === 2} iconClass="text-white" />
+          <PremiumNavButton icon="leaderboard" text="Leaderboard" active={dragIndex === 3} iconClass="text-[#ff174f]" />
+          <PremiumNavButton icon="support" text="Support" active={dragIndex === 4} iconClass="text-[#18a957]" />
         </div>
       </nav>
 
@@ -402,7 +467,7 @@ export default function Home() {
               </DrawerGroup>
 
               <DrawerGroup title="GAMING">
-                <DrawerItem icon="🏆" text="Leaderboard" />
+                <DrawerItem icon="leaderboard" text="Leaderboard" />
                 <DrawerItem icon="📊" text="My Stats" />
               </DrawerGroup>
 
@@ -534,57 +599,118 @@ function AnimatedNavButton({
   );
 }
 
+function NavIcon({
+  type,
+  active,
+}: {
+  type: "scratch" | "spin" | "home" | "leaderboard" | "support";
+  active?: boolean;
+}) {
+  const colorClass =
+    type === "home"
+      ? "text-white"
+      : active
+      ? type === "spin" || type === "support"
+        ? "text-[#18a957]"
+        : "text-[#ff174f]"
+      : "text-slate-500";
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`h-[22px] w-[22px] ${colorClass}`}
+      aria-hidden="true"
+    >
+      {type === "scratch" && (
+        <>
+          <rect x="3.5" y="5" width="17" height="14" rx="2.2" />
+          <path d="M7 9h.01M10 9h.01M14 9h.01M17 9h.01" />
+          <path d="M7 13h3M14 13h3M7 16h.01M10 16h.01M14 16h.01M17 16h.01" />
+        </>
+      )}
+
+      {type === "spin" && (
+        <>
+          <circle cx="12" cy="12" r="8.2" />
+          <circle cx="12" cy="12" r="2" />
+          <path d="M12 3.8v4.1M20.2 12h-4.1M12 20.2v-4.1M3.8 12h4.1" />
+          <path d="M17.8 6.2l-2.9 2.9M17.8 17.8l-2.9-2.9M6.2 17.8l2.9-2.9M6.2 6.2l2.9 2.9" />
+          <path d="M19.3 4.8v3.4h-3.4" />
+        </>
+      )}
+
+      {type === "home" && (
+        <>
+          <path d="M3.5 10.8 12 3.8l8.5 7v8.4a1.5 1.5 0 0 1-1.5 1.5h-4.2v-5.5H9.2v5.5H5a1.5 1.5 0 0 1-1.5-1.5z" />
+          <path d="M8.7 9.5h6.6" />
+        </>
+      )}
+
+      {type === "leaderboard" && (
+        <>
+          <path d="M8 20h8" />
+          <path d="M12 17v3" />
+          <path d="M7.2 9.2V6.8h3.1v2.4" />
+          <path d="M13.7 7.8h3.1v5.1" />
+          <path d="M3.8 12.8h3.1v4.4H3.8zM10.45 9.2h3.1v8h-3.1zM17.1 7.8h3.1v9.4h-3.1z" />
+          <path d="M9.1 4.2h5.8l1.2 2.2-1.2 2.1h-5.8L7.9 6.4z" />
+        </>
+      )}
+
+      {type === "support" && (
+        <>
+          <path d="M4.2 13.2v-1.5a7.8 7.8 0 0 1 15.6 0v1.5" />
+          <path d="M4.2 13.2H6a1.6 1.6 0 0 1 1.6 1.6v2A1.6 1.6 0 0 1 6 18.4H4.2z" />
+          <path d="M19.8 13.2H18a1.6 1.6 0 0 0-1.6 1.6v2a1.6 1.6 0 0 0 1.6 1.6h1.8z" />
+          <path d="M16.4 18.4c-.7 1.2-2 1.9-3.5 1.9h-1.5" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 function PremiumNavButton({
   icon,
   text,
   active,
-  onClick,
 }: {
-  icon: string;
+  icon: "scratch" | "spin" | "home" | "leaderboard" | "support";
   text: string;
   active: boolean;
-  onClick?: () => void;
+  iconClass?: string;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`group relative z-10 flex h-[62px] min-w-0 flex-col items-center justify-center rounded-2xl px-1 transition-all duration-300 active:scale-90 ${
-        active ? "text-red-500" : "text-slate-500"
+    <div
+      className={`relative z-10 flex h-full w-full flex-col items-center justify-center gap-0.5 select-none ${
+        active ? "font-semibold" : "font-medium"
       }`}
     >
-      <span
-        className={`relative flex h-9 w-9 items-center justify-center rounded-[13px] text-[20px] transition-all duration-500 ${
-          active
-            ? "scale-110 bg-white shadow-[0_6px_18px_rgba(255,23,79,0.16)]"
-            : "bg-transparent group-hover:scale-110"
+      <div
+        className={`flex h-8 w-9 items-center justify-center rounded-xl ${
+          icon === "home" && active
+            ? "bg-gradient-to-br from-[#ff174f] to-[#18a957] shadow-[0_4px_12px_rgba(255,23,79,0.22)]"
+            : ""
         }`}
       >
-        <span
-          className={
-            active
-              ? "animate-[navBounce_0.55s_ease-in-out_1]"
-              : "transition-transform duration-300 group-hover:-translate-y-1"
-          }
-        >
-          {icon}
-        </span>
-      </span>
-
+        <NavIcon type={icon} active={active} />
+      </div>
       <span
-        className={`relative z-10 mt-1 max-w-full truncate text-[9px] font-extrabold tracking-tight transition-all duration-300 ${
-          active ? "text-red-500" : "text-slate-500"
+        className={`text-[10px] leading-none ${
+          active
+            ? icon === "spin" || icon === "support"
+              ? "text-[#18a957]"
+              : "text-[#ff174f]"
+            : "text-slate-500"
         }`}
       >
         {text}
       </span>
-
-      {/* Tiny sliding indicator */}
-      <span
-        className={`absolute bottom-0 h-1 rounded-full bg-gradient-to-r from-red-500 to-pink-500 transition-all duration-500 ${
-          active ? "w-5 opacity-100" : "w-1 opacity-0"
-        }`}
-      />
-    </button>
+    </div>
   );
 }
 
