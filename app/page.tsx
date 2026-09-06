@@ -4,8 +4,9 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-const banners = [
+const fallbackBanners = [
   {
     title: "BOOYAH QUIZ",
     subtitle: "FREE FIRE MAX QUESTIONS",
@@ -31,6 +32,15 @@ const banners = [
     gradient: "from-green-700 via-emerald-500 to-lime-400",
   },
 ];
+
+type DbBanner = {
+  id: string;
+  image_url: string;
+  click_url: string | null;
+  title: string | null;
+  is_active: boolean;
+  sort_order: number;
+};
 
 const menuItems = [
   ["👤", "My Profile"],
@@ -83,6 +93,8 @@ export default function Home() {
     }
   }, [activeNavIndex, draggingNav]);
   const [banner, setBanner] = useState(0);
+  const [dbBanners, setDbBanners] = useState<DbBanner[]>([]);
+  const bannerCount = dbBanners.length > 0 ? dbBanners.length : fallbackBanners.length;
   const [loggingOut, setLoggingOut] = useState(false);
   const [profile, setProfile] = useState({
     name: "",
@@ -115,14 +127,45 @@ export default function Home() {
     setTouchStartX(null);
   }
 
+  // Load active banners created by the admin.
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadBanners() {
+      try {
+        const { data, error } = await supabase
+          .from("banners")
+          .select("id,image_url,click_url,title,is_active,sort_order")
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: false });
+
+        if (!error && mounted) {
+          setDbBanners((data || []) as DbBanner[]);
+          setBanner(0);
+        }
+      } catch (error) {
+        console.error("Banner load error:", error);
+      }
+    }
+
+    loadBanners();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   // Automatic banner slider. Manual dots below still work.
   useEffect(() => {
+    if (bannerCount <= 1) return;
+
     const timer = window.setInterval(() => {
-      setBanner((current) => (current + 1) % banners.length);
+      setBanner((current) => (current + 1) % bannerCount);
     }, 4000);
 
     return () => window.clearInterval(timer);
-  }, []);
+  }, [bannerCount]);
 
   useEffect(() => {
     let mounted = true;
@@ -183,7 +226,7 @@ export default function Home() {
               <button
                 onClick={() => setDrawer(true)}
                 aria-label="Open menu"
-                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-2xl transition active:scale-90"
+                className="flex h-12 w-12 items-center justify-center rounded-[16px] flex items-center justify-center bg-[#641d3b]/80 text-2xl transition active:scale-90"
               >
                 ☰
               </button>
@@ -199,7 +242,7 @@ export default function Home() {
               {/* NOTIFICATION */}
               <button
                 aria-label="Notifications"
-                className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-xl transition active:scale-90"
+                className="relative flex h-12 w-12 items-center justify-center rounded-[16px] flex items-center justify-center bg-[#641d3b]/80 text-xl transition active:scale-90"
               >
                 🔔
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-300" />
@@ -207,34 +250,59 @@ export default function Home() {
             </header>
 
             {/* BANNER INSIDE RED CURVE */}
-            <section className="mt-3 overflow-hidden rounded-[26px] border border-white/30 bg-white/10 p-1.5 shadow-[0_12px_30px_rgba(100,29,59,0.28)] backdrop-blur-sm">
+            <section className="mt-3 -mx-1 overflow-hidden rounded-[26px] border border-white/30 bg-white/10 p-1.5 shadow-[0_12px_30px_rgba(100,29,59,0.28)] backdrop-blur-sm">
               <div className="overflow-hidden rounded-[20px]">
-                <div
-                  className={`flex h-44 items-center justify-between bg-gradient-to-r ${banners[banner].gradient} p-5 transition-all duration-500`}
-                >
-                  <div>
-                    <p className="text-xs font-bold">THINK FAST. WIN BIG.</p>
-                    <h2 className="mt-1 text-4xl font-black italic">
-                      {banners[banner].title}
-                    </h2>
-                    <p className="mt-2 text-xs font-bold">
-                      {banners[banner].subtitle}
-                    </p>
-                    <button className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-black shadow-lg transition active:scale-95">
-                      PLAY NOW »
-                    </button>
-                  </div>
+                {dbBanners.length > 0 ? (
+                  <button
+                    type="button"
+                    aria-label={`Open banner ${banner + 1}`}
+                    onClick={() => {
+                      const url = dbBanners[banner]?.click_url;
+                      if (url) window.location.href = url;
+                    }}
+                    className={`block h-40 w-full ${
+                      dbBanners[banner]?.click_url
+                        ? "cursor-pointer"
+                        : "cursor-default"
+                    }`}
+                  >
+                    <img
+                      src={dbBanners[banner].image_url}
+                      alt={dbBanners[banner].title || "Gamerzadda banner"}
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.opacity = "0.35";
+                      }}
+                    />
+                  </button>
+                ) : (
+                  <div
+                    className={`flex h-40 items-center justify-between bg-gradient-to-r ${fallbackBanners[banner].gradient} p-5 transition-all duration-500`}
+                  >
+                    <div>
+                      <p className="text-xs font-bold">THINK FAST. WIN BIG.</p>
+                      <h2 className="mt-1 text-4xl font-black italic">
+                        {fallbackBanners[banner].title}
+                      </h2>
+                      <p className="mt-2 text-xs font-bold">
+                        {fallbackBanners[banner].subtitle}
+                      </p>
+                      <button className="mt-2 rounded-xl bg-red-600 px-5 py-2 text-sm font-black shadow-lg transition active:scale-95">
+                        PLAY NOW »
+                      </button>
+                    </div>
 
-                  <div className="text-7xl">
-                    {banners[banner].emoji}
+                    <div className="text-7xl">
+                      {fallbackBanners[banner].emoji}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </section>
 
             {/* BANNER DOTS */}
-            <div className="mt-3 flex justify-center gap-2">
-              {banners.map((_, i) => (
+            <div className="mt-1 flex justify-center gap-2">
+              {Array.from({ length: bannerCount }).map((_, i) => (
                 <button
                   key={i}
                   aria-label={`Banner ${i + 1}`}
@@ -252,7 +320,7 @@ export default function Home() {
       {/* SCROLLABLE APP CONTENT */}
       <div className="mx-auto max-w-md bg-white px-4 pb-8">
         {/* GAME CARDS */}
-        <section className="mt-5 grid grid-cols-2 gap-3">
+        <section className="mt-1 grid grid-cols-2 gap-3">
           <GameCard
             title="FREE FIRE"
             subtitle="PLAY HARD • WIN BIG"
@@ -268,7 +336,7 @@ export default function Home() {
 
         {/* CLASH SQUAD */}
         <section className="mt-3">
-          <div className="flex h-44 items-center justify-between overflow-hidden rounded-2xl bg-gradient-to-r from-pink-600 via-red-500 to-orange-400 p-5">
+          <div className="flex h-40 items-center justify-between overflow-hidden rounded-[16px] flex items-center justify-center bg-gradient-to-r from-pink-600 via-red-500 to-orange-400 p-5">
             <div>
               <p className="text-4xl font-black italic">CLASH</p>
               <p className="text-4xl font-black text-yellow-300 italic">
@@ -283,8 +351,8 @@ export default function Home() {
         </section>
 
         {/* TOURNAMENTS */}
-        <section className="mt-8">
-          <div className="mb-4 flex items-center justify-between">
+        <section className="mt-2">
+          <div className="mb-2 flex items-center justify-between">
             <h2 className="text-xl font-extrabold text-slate-900">
               🔥 Live Tournaments
             </h2>
@@ -396,7 +464,7 @@ export default function Home() {
         >
           {/* SMOOTH SLIDING PILL */}
           <span
-            className={`pointer-events-none absolute bottom-1 top-1 w-[calc(20%_-_4px)] rounded-2xl bg-gradient-to-b from-red-50 via-pink-50 to-white shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_5px_16px_rgba(255,23,79,0.12)] ${
+            className={`pointer-events-none absolute bottom-1 top-1 w-[calc(20%_-_4px)] rounded-[16px] flex items-center justify-center bg-gradient-to-b from-red-50 via-pink-50 to-white shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_5px_16px_rgba(255,23,79,0.12)] ${
               draggingNav
                 ? "scale-[1.03] transition-transform duration-75"
                 : "transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
@@ -407,11 +475,11 @@ export default function Home() {
             }}
           />
 
-          <PremiumNavButton icon="scratch" text="Scratch" active={dragIndex === 0} iconClass="text-[#ff174f]" />
-          <PremiumNavButton icon="scratch" text="Spin" active={dragIndex === 1} iconClass="text-[#18a957]" />
-          <PremiumNavButton icon="home" text="Home" active={dragIndex === 2} iconClass="text-white" />
-          <PremiumNavButton icon="leaderboard" text="Leaderboard" active={dragIndex === 3} iconClass="text-[#ff174f]" />
-          <PremiumNavButton icon="support" text="Support" active={dragIndex === 4} iconClass="text-[#18a957]" />
+          <PremiumNavButton icon="scratch" text="Scratch" active={dragIndex === 0} />
+          <PremiumNavButton icon="spin" text="Spin" active={dragIndex === 1} />
+          <PremiumNavButton icon="home" text="Home" active={dragIndex === 2} />
+          <PremiumNavButton icon="leaderboard" text="Leaderboard" active={dragIndex === 3} />
+          <PremiumNavButton icon="support" text="Support" active={dragIndex === 4} />
         </div>
       </nav>
 
@@ -488,7 +556,7 @@ export default function Home() {
                 <DrawerItem icon="▶️" text="YouTube" />
               </DrawerGroup>
 
-              <p className="mt-8 rounded-xl bg-emerald-50 py-3 text-center font-bold text-emerald-700">
+              <p className="mt-2 rounded-xl bg-emerald-50 py-3 text-center font-bold text-emerald-700">
                 Gamerz<span className="text-red-500">Adda</span>
               </p>
             </div>
@@ -509,11 +577,11 @@ function GameCard({
   emoji: string;
 }) {
   return (
-    <button className="relative h-44 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-blue-700 to-cyan-500 p-4 text-left">
+    <button className="relative h-40 overflow-hidden rounded-[16px] flex items-center justify-center border border-white/10 bg-gradient-to-br from-blue-700 to-cyan-500 p-4 text-left">
       <div className="relative z-10">
         <h3 className="text-xl font-black">{title}</h3>
         <p className="mt-1 text-[9px] font-bold">{subtitle}</p>
-        <span className="mt-12 inline-block rounded-lg bg-red-600 px-3 py-2 text-xs font-black">
+        <span className="mt-2 inline-block rounded-lg bg-red-600 px-3 py-2 text-xs font-black">
           PLAY NOW »
         </span>
       </div>
@@ -536,7 +604,7 @@ function Tournament({
   players: string;
 }) {
   return (
-    <div className="mb-3 rounded-2xl border border-white/10 bg-[#11182b] p-4">
+    <div className="mb-3 rounded-[16px] flex items-center justify-center border border-white/10 bg-[#11182b] p-4">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[10px] font-bold text-red-400">{game}</p>
@@ -547,7 +615,7 @@ function Tournament({
         </button>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 text-center">
+      <div className="mt-2 grid grid-cols-3 text-center">
         <div>
           <p className="text-[10px] text-slate-400">PRIZE</p>
           <p className="font-black text-green-400">{prize}</p>
@@ -577,7 +645,7 @@ function AnimatedNavButton({
   return (
     <button
       onClick={onClick}
-      className="group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-slate-500 transition-all duration-300 active:scale-90"
+      className="group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-[16px] flex items-center justify-center px-1 py-2 text-slate-500 transition-all duration-300 active:scale-90"
     >
       {/* Sliding highlight */}
       <span className="pointer-events-none absolute inset-x-2 top-1 h-8 -translate-y-1 rounded-xl bg-red-50 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-active:translate-y-0 group-active:opacity-100" />
@@ -599,79 +667,26 @@ function AnimatedNavButton({
   );
 }
 
-function NavIcon({
-  type,
-  active,
-}: {
-  type: "scratch" | "spin" | "home" | "leaderboard" | "support";
-  active?: boolean;
-}) {
-  const colorClass =
-    type === "home"
-      ? "text-white"
-      : active
-      ? type === "spin" || type === "support"
-        ? "text-[#18a957]"
-        : "text-[#ff174f]"
-      : "text-slate-500";
+function NavIcon({ type, active }: { type: "scratch" | "spin" | "home" | "leaderboard" | "support"; active: boolean }) {
+  const emoji = {
+    scratch: "🎟️",
+    home: "🏠",
+    spin: "🎡",
+    leaderboard: "🏆",
+    support: "🎧",
+  }[type]
 
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={`h-[22px] w-[22px] ${colorClass}`}
-      aria-hidden="true"
+    <span
+      className={`text-[25px] leading-none select-none transition-transform duration-200 ${
+        active ? "scale-110" : "scale-100"
+      }`}
+      role="img"
+      aria-label={type}
     >
-      {type === "scratch" && (
-        <>
-          <rect x="3.5" y="5" width="17" height="14" rx="2.2" />
-          <path d="M7 9h.01M10 9h.01M14 9h.01M17 9h.01" />
-          <path d="M7 13h3M14 13h3M7 16h.01M10 16h.01M14 16h.01M17 16h.01" />
-        </>
-      )}
-
-      {type === "spin" && (
-        <>
-          <circle cx="12" cy="12" r="8.2" />
-          <circle cx="12" cy="12" r="2" />
-          <path d="M12 3.8v4.1M20.2 12h-4.1M12 20.2v-4.1M3.8 12h4.1" />
-          <path d="M17.8 6.2l-2.9 2.9M17.8 17.8l-2.9-2.9M6.2 17.8l2.9-2.9M6.2 6.2l2.9 2.9" />
-          <path d="M19.3 4.8v3.4h-3.4" />
-        </>
-      )}
-
-      {type === "home" && (
-        <>
-          <path d="M3.5 10.8 12 3.8l8.5 7v8.4a1.5 1.5 0 0 1-1.5 1.5h-4.2v-5.5H9.2v5.5H5a1.5 1.5 0 0 1-1.5-1.5z" />
-          <path d="M8.7 9.5h6.6" />
-        </>
-      )}
-
-      {type === "leaderboard" && (
-        <>
-          <path d="M8 20h8" />
-          <path d="M12 17v3" />
-          <path d="M7.2 9.2V6.8h3.1v2.4" />
-          <path d="M13.7 7.8h3.1v5.1" />
-          <path d="M3.8 12.8h3.1v4.4H3.8zM10.45 9.2h3.1v8h-3.1zM17.1 7.8h3.1v9.4h-3.1z" />
-          <path d="M9.1 4.2h5.8l1.2 2.2-1.2 2.1h-5.8L7.9 6.4z" />
-        </>
-      )}
-
-      {type === "support" && (
-        <>
-          <path d="M4.2 13.2v-1.5a7.8 7.8 0 0 1 15.6 0v1.5" />
-          <path d="M4.2 13.2H6a1.6 1.6 0 0 1 1.6 1.6v2A1.6 1.6 0 0 1 6 18.4H4.2z" />
-          <path d="M19.8 13.2H18a1.6 1.6 0 0 0-1.6 1.6v2a1.6 1.6 0 0 0 1.6 1.6h1.8z" />
-          <path d="M16.4 18.4c-.7 1.2-2 1.9-3.5 1.9h-1.5" />
-        </>
-      )}
-    </svg>
-  );
+      {emoji}
+    </span>
+  )
 }
 
 function PremiumNavButton({
@@ -722,11 +737,11 @@ function DrawerGroup({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-6">
+    <div className="mb-2">
       <p className="mb-2 px-1 text-[10px] font-black tracking-[0.16em] text-emerald-600">
         {title}
       </p>
-      <div className="space-y-1 rounded-2xl border border-emerald-100/80 bg-slate-50/60 p-1">{children}</div>
+      <div className="space-y-1 rounded-[16px] flex items-center justify-center border border-emerald-100/80 bg-slate-50/60 p-1">{children}</div>
     </div>
   );
 }
