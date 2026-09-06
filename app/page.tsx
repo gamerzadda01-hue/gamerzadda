@@ -108,84 +108,89 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-white pb-24 text-slate-900">
-      {/* FIXED TOP BAR — only these 3 buttons stay fixed */}
-      <div className="fixed left-0 right-0 top-0 z-[90] bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 py-4 shadow-xl">
-        <div className="mx-auto max-w-md">
-          <header className="flex items-center justify-between">
-            {/* MENU */}
-            <button
-              onClick={() => setDrawer(true)}
-              aria-label="Open menu"
-              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-2xl transition active:scale-90"
-            >
-              ☰
-            </button>
+      {/* HEADER + BANNER — one red curved scrolling section */}
+      <div className="relative z-50">
+        <div className="rounded-b-[34px] bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 pb-5 pt-4 shadow-xl">
+          <div className="mx-auto max-w-md">
+            {/* FIXED BUTTONS ONLY */}
+            <div className="fixed left-0 right-0 top-0 z-[90] px-4 pt-4">
+              <div className="mx-auto flex max-w-md items-center justify-between">
+                {/* MENU */}
+                <button
+                  onClick={() => setDrawer(true)}
+                  aria-label="Open menu"
+                  className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-2xl transition active:scale-90"
+                >
+                  ☰
+                </button>
 
-            {/* WALLET */}
-            <button
-              onClick={() => router.push("/wallet")}
-              className="flex min-w-[130px] items-center justify-center gap-2 rounded-full bg-[#641d3b]/80 px-5 py-3 font-bold transition active:scale-95"
-            >
-              💰 ₹0
-            </button>
+                {/* WALLET */}
+                <button
+                  onClick={() => router.push("/wallet")}
+                  className="flex min-w-[130px] items-center justify-center gap-2 rounded-full bg-[#641d3b]/80 px-5 py-3 font-bold transition active:scale-95"
+                >
+                  💰 ₹0
+                </button>
 
-            {/* NOTIFICATION */}
-            <button
-              aria-label="Notifications"
-              className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-xl transition active:scale-90"
-            >
-              🔔
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-300" />
-            </button>
-          </header>
+                {/* NOTIFICATION */}
+                <button
+                  aria-label="Notifications"
+                  className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-[#641d3b]/80 text-xl transition active:scale-90"
+                >
+                  🔔
+                  <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-300" />
+                </button>
+              </div>
+            </div>
+
+            {/* SPACE FOR FIXED BUTTONS */}
+            <div className="h-[48px]" />
+
+            {/* BANNER INSIDE RED CURVE */}
+            <section className="mt-3 overflow-hidden rounded-[26px] border border-white/30 bg-white/10 p-1.5 shadow-[0_12px_30px_rgba(100,29,59,0.28)] backdrop-blur-sm">
+              <div className="overflow-hidden rounded-[20px]">
+                <div
+                  className={`flex h-44 items-center justify-between bg-gradient-to-r ${banners[banner].gradient} p-5 transition-all duration-500`}
+                >
+                  <div>
+                    <p className="text-xs font-bold">THINK FAST. WIN BIG.</p>
+                    <h2 className="mt-1 text-4xl font-black italic">
+                      {banners[banner].title}
+                    </h2>
+                    <p className="mt-2 text-xs font-bold">
+                      {banners[banner].subtitle}
+                    </p>
+                    <button className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-black shadow-lg transition active:scale-95">
+                      PLAY NOW »
+                    </button>
+                  </div>
+
+                  <div className="text-7xl">
+                    {banners[banner].emoji}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* BANNER DOTS */}
+            <div className="mt-3 flex justify-center gap-2">
+              {banners.map((_, i) => (
+                <button
+                  key={i}
+                  aria-label={`Banner ${i + 1}`}
+                  onClick={() => setBanner(i)}
+                  className={`h-2 rounded-full transition-all ${
+                    banner === i ? "w-7 bg-white" : "w-2 bg-white/50"
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Space for fixed top bar */}
-      <div className="h-[80px]" />
-
       {/* SCROLLABLE APP CONTENT */}
       <div className="mx-auto max-w-md bg-white px-4 pb-8">
-        {/* BANNER */}
-        <section className="overflow-hidden rounded-[26px] border border-white/30 bg-white/10 p-1.5 shadow-[0_12px_30px_rgba(100,29,59,0.28)]">
-          <div className="overflow-hidden rounded-[20px]">
-            <div
-              className={`flex h-44 items-center justify-between bg-gradient-to-r ${banners[banner].gradient} p-5 transition-all duration-500`}
-            >
-              <div>
-                <p className="text-xs font-bold">THINK FAST. WIN BIG.</p>
-                <h2 className="mt-1 text-4xl font-black italic">
-                  {banners[banner].title}
-                </h2>
-                <p className="mt-2 text-xs font-bold">
-                  {banners[banner].subtitle}
-                </p>
-                <button className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-black shadow-lg transition active:scale-95">
-                  PLAY NOW »
-                </button>
-              </div>
-
-              <div className="text-7xl">
-                {banners[banner].emoji}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* BANNER DOTS */}
-        <div className="mt-3 flex justify-center gap-2">
-          {banners.map((_, i) => (
-            <button
-              key={i}
-              aria-label={`Banner ${i + 1}`}
-              onClick={() => setBanner(i)}
-              className={`h-2 rounded-full transition-all ${
-                banner === i ? "w-7 bg-red-500" : "w-2 bg-slate-300"
-              }`}
-            />
-          ))}
-        </div>
-
         {/* GAME CARDS */}
         <section className="mt-5 grid grid-cols-2 gap-3">
           <GameCard
@@ -254,7 +259,7 @@ export default function Home() {
         </section>
       </div>
 
-      {/* BOTTOM NAV - FIXED */}
+      {/* BOTTOM NAV — FIXED */}
       <nav className="fixed bottom-3 left-1/2 z-40 w-[calc(100%-20px)] max-w-md -translate-x-1/2 rounded-[27px] border border-black/10 bg-white/70 px-2 py-2 shadow-[0_10px_35px_rgba(0,0,0,0.14)] backdrop-blur-2xl backdrop-saturate-150">
         <div className="grid grid-cols-5 items-end">
           <NavButton
