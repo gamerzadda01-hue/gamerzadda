@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Profile = {
-  id: string;
   name: string;
   email: string;
   phone: string;
@@ -14,636 +13,317 @@ type Profile = {
 };
 
 type Wallet = {
-  deposit: number;
-  bonus: number;
-  winning: number;
-  total: number;
+  deposit_balance: number;
+  bonus_balance: number;
+  winning_balance: number;
 };
 
 export default function ProfilePage() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
 
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile>({
+    name: "",
+    email: "",
+    phone: "",
+    referralCode: "",
+    bio: "",
+    avatarUrl: "",
+  });
 
   const [wallet, setWallet] = useState<Wallet>({
-    deposit: 0,
-    bonus: 0,
-    winning: 0,
-    total: 0,
+    deposit_balance: 0,
+    bonus_balance: 0,
+    winning_balance: 0,
   });
 
   const [loading, setLoading] = useState(true);
-  const [savingBio, setSavingBio] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
+  const [saving, setSaving] = useState(false);
   const [bio, setBio] = useState("");
-  const [preview, setPreview] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
+  async function shareReferralCode() {
+    const code = profile.referralCode || "";
+    if (!code) return;
 
-  async function loadProfile() {
-    try {
-      setLoading(true);
-      setError("");
-
-      const response = await fetch("/api/profile", {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error || "Failed to load profile."
-        );
-      }
-
-      setProfile(data.profile);
-
-      setWallet({
-        deposit: Number(data.wallet?.deposit || 0),
-        bonus: Number(data.wallet?.bonus || 0),
-        winning: Number(data.wallet?.winning || 0),
-        total: Number(data.wallet?.total || 0),
-      });
-
-      setBio(data.profile?.bio || "");
-      setPreview(data.profile?.avatarUrl || "");
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load profile."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function formatMoney(amount: number) {
-    return `₹${amount.toFixed(2)}`;
-  }
-
-  function handleBioChange(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const value = event.target.value;
-
-    if (value.length > 30) return;
-
-    if (!/^[A-Za-z0-9 ]*$/.test(value)) {
-      return;
-    }
-
-    setBio(value);
-    setMessage("");
-    setError("");
-  }
-
-  async function saveBio() {
-    try {
-      setSavingBio(true);
-      setMessage("");
-      setError("");
-
-      const response = await fetch("/api/profile", {
-        method: "PATCH",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          bio,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error || "Failed to save bio."
-        );
-      }
-
-      setProfile(data.profile);
-      setBio(data.profile.bio || "");
-
-      setMessage("Bio updated successfully.");
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to save bio."
-      );
-    } finally {
-      setSavingBio(false);
-    }
-  }
-
-  function selectProfilePicture() {
-    fileInputRef.current?.click();
-  }
-
-  async function handleProfilePicture(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const file = event.target.files?.[0];
-
-    if (!file) return;
-
-    setMessage("");
-    setError("");
-
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
-      setError(
-        "Only JPG, PNG or WebP images are allowed."
-      );
-
-      event.target.value = "";
-      return;
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      setError(
-        "Profile picture must be 2 MB or smaller."
-      );
-
-      event.target.value = "";
-      return;
-    }
-
-    const localPreview = URL.createObjectURL(file);
-    setPreview(localPreview);
-
-    try {
-      setUploading(true);
-
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch(
-        "/api/profile/avatar",
-        {
-          method: "POST",
-          credentials: "include",
-          body: formData,
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            "Failed to upload profile picture."
-        );
-      }
-
-      setPreview(data.avatarUrl);
-
-      setProfile((previous) =>
-        previous
-          ? {
-              ...previous,
-              avatarUrl: data.avatarUrl,
-            }
-          : previous
-      );
-
-      setMessage(
-        "Profile picture updated successfully."
-      );
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to upload profile picture."
-      );
-
-      if (profile?.avatarUrl) {
-        setPreview(profile.avatarUrl);
-      } else {
-        setPreview("");
-      }
-    } finally {
-      setUploading(false);
-      event.target.value = "";
-    }
-  }
-
-  async function copyReferral() {
-    if (!profile?.referralCode) return;
-
-    try {
-      await navigator.clipboard.writeText(
-        profile.referralCode
-      );
-
-      setMessage("Referral code copied.");
-    } catch {
-      setError("Unable to copy referral code.");
-    }
-  }
-
-  async function shareReferral() {
-    if (!profile?.referralCode) return;
-
-    const text = `🔥 Download GamerzAdda Now!
-
-🎮 Play Hard. Win Big. 🏆
-
-Download now:
-https://gamerzadda.com
-
-🎁 Use my referral code: ${profile.referralCode}
-
-Join GamerzAdda and start playing! 🔥`;
+    const shareText = `Join me on Gamerzadda! Use my referral code: ${code}`;
 
     try {
       if (navigator.share) {
         await navigator.share({
-          title: "Join GamerzAdda 🎮",
-          text,
+          title: "Gamerzadda Referral",
+          text: shareText,
         });
-      } else {
-        await navigator.clipboard.writeText(text);
-
-        setMessage(
-          "Referral message copied."
-        );
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(code);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
       }
     } catch {
-      // User cancelled sharing
+      // User cancelled native share; no action needed.
+    }
+  }
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadProfile() {
+      try {
+        const response = await fetch("/api/profile", {
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const result = await response.json();
+
+        if (!mounted) return;
+
+        if (!response.ok || !result?.profile) {
+          router.push("/");
+          return;
+        }
+
+        setProfile(result.profile);
+        setBio(result.profile.bio || "");
+        setWallet(result.wallet || {});
+      } catch {
+        if (mounted) router.push("/");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    loadProfile();
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
+  async function saveBio() {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/profile", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bio }),
+      });
+
+      if (response.ok) {
+        setProfile((prev) => ({ ...prev, bio }));
+      }
+    } finally {
+      setSaving(false);
     }
   }
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-white via-white to-green-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto h-10 w-10 rounded-full border-4 border-red-100 border-t-red-600 animate-spin" />
-
-          <p className="mt-4 text-sm font-medium text-gray-500">
-            Loading profile...
-          </p>
-        </div>
-      </main>
-    );
-  }
-
-  if (!profile) {
-    return (
-      <main className="min-h-screen bg-gradient-to-b from-white via-white to-green-50 flex items-center justify-center px-5">
-        <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-xl border border-gray-100">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-3xl">
-            👤
-          </div>
-
-          <h1 className="text-2xl font-black text-gray-900">
-            Login Required
-          </h1>
-
-          <p className="mt-2 text-sm text-gray-500">
-            Please login to view your profile.
-          </p>
-
-          <Link
-            href="/login"
-            className="mt-6 block rounded-2xl bg-red-600 py-3.5 text-center font-bold text-white shadow-lg shadow-red-200"
-          >
-            Login
-          </Link>
+      <main className="min-h-screen bg-[#f5faf7] px-5 pt-6">
+        <div className="mx-auto max-w-md animate-pulse">
+          <div className="h-12 w-12 rounded-2xl bg-emerald-100" />
+          <div className="mt-8 h-64 rounded-[30px] bg-white shadow-sm" />
         </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-white via-white to-green-50 pb-10">
-      <div className="mx-auto w-full max-w-2xl px-4 py-5">
+    <main className="min-h-screen bg-[#f5faf7] text-slate-900">
+      <div className="mx-auto min-h-screen w-full max-w-md px-4 pb-10">
 
-        {/* HEADER */}
-        <div className="mb-5 flex items-center gap-3">
-          <Link
-            href="/"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-xl text-gray-900 shadow-md border border-gray-100 transition active:scale-95"
+        {/* Premium top bar — no Gamerzadda text */}
+        <header className="flex items-center justify-between py-5">
+          <button
+            onClick={() => router.back()}
+            aria-label="Go back"
+            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
           >
-            ←
-          </Link>
-
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-red-500">
-              GamerzAdda
-            </p>
-
-            <h1 className="text-2xl font-black text-gray-900">
-              My Profile
-            </h1>
-          </div>
-        </div>
-
-        {/* SUCCESS MESSAGE */}
-        {message && (
-          <div className="mb-4 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
-            {message}
-          </div>
-        )}
-
-        {/* ERROR MESSAGE */}
-        {error && (
-          <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">
-            {error}
-          </div>
-        )}
-
-        {/* PROFILE CARD */}
-        <section className="rounded-3xl bg-white p-5 shadow-xl border border-gray-100">
-          <div className="flex items-center gap-4">
-
-            <div className="relative">
-              {preview ? (
-                <img
-                  src={preview}
-                  alt="Profile"
-                  className="h-24 w-24 rounded-full object-cover border-4 border-green-100 shadow-md"
-                />
-              ) : (
-                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-red-700 text-4xl text-white shadow-md">
-                  {profile.name
-                    ?.charAt(0)
-                    ?.toUpperCase() || "G"}
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={selectProfilePicture}
-                disabled={uploading}
-                className="absolute bottom-0 right-0 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white shadow-lg"
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                {uploading ? "…" : "📷"}
-              </button>
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </span>
+          </button>
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={handleProfilePicture}
-                className="hidden"
-              />
-            </div>
-
-            <div className="min-w-0">
-              <h2 className="truncate text-xl font-black text-gray-900">
-                {profile.name || "Gamer"}
-              </h2>
-
-              <p className="mt-1 truncate text-sm text-gray-500">
-                {profile.email}
-              </p>
-
-              <p className="mt-1 text-xs font-medium text-gray-400">
-                JPG / PNG / WebP • Max 2 MB
-              </p>
-            </div>
+          <div className="rounded-full border border-emerald-100 bg-white px-4 py-2 text-xs font-bold text-emerald-700 shadow-sm">
+            MY PROFILE
           </div>
-        </section>
 
-        {/* PERSONAL INFORMATION */}
-        <section className="mt-5 rounded-3xl bg-white p-5 shadow-lg border border-gray-100">
-          <div className="mb-4">
-            <h2 className="text-lg font-black text-gray-900">
-              Personal Information
-            </h2>
+          <div className="h-11 w-11" />
+        </header>
 
-            <p className="mt-1 text-xs text-gray-400">
-              These details cannot be changed.
+        {/* Profile hero */}
+        <section className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-[#ff1749] via-[#f52a55] to-[#ff6a7f] p-6 text-white shadow-[0_20px_50px_rgba(255,23,73,0.20)]">
+          <div className="absolute -right-14 -top-16 h-40 w-40 rounded-full bg-white/10" />
+          <div className="absolute -bottom-20 -left-12 h-44 w-44 rounded-full bg-emerald-300/15" />
+
+          <div className="relative flex flex-col items-center text-center">
+            <div className="rounded-full bg-white/20 p-1.5 shadow-xl backdrop-blur-sm">
+              <div className="h-24 w-24 overflow-hidden rounded-full border-4 border-white bg-emerald-50">
+                {profile.avatarUrl ? (
+                  <img
+                    src={profile.avatarUrl}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-4xl">
+                    👤
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <h1 className="mt-4 text-2xl font-black tracking-tight">
+              {profile.name || "Player"}
+            </h1>
+
+            <p className="mt-1 max-w-[280px] truncate text-sm text-white/80">
+              {profile.bio || "Welcome to your profile"}
             </p>
-          </div>
-
-          <div className="space-y-4">
-
-            <ReadOnlyField
-              label="Full Name"
-              value={profile.name}
-            />
-
-            <ReadOnlyField
-              label="Email"
-              value={profile.email}
-            />
-
-            <ReadOnlyField
-              label="Phone Number"
-              value={profile.phone}
-            />
-
-            <ReadOnlyField
-              label="Referral Code"
-              value={profile.referralCode}
-            />
 
           </div>
         </section>
 
-        {/* BIO */}
-        <section className="mt-5 rounded-3xl bg-white p-5 shadow-lg border border-gray-100">
+        {/* Wallet summary - clickable */}
+        <button
+          type="button"
+          onClick={() => router.push("/wallet")}
+          className="mt-5 w-full rounded-[28px] border border-emerald-100 bg-white p-5 text-left shadow-[0_12px_35px_rgba(15,23,42,0.06)] transition active:scale-[0.99] hover:border-emerald-200 hover:shadow-[0_16px_40px_rgba(16,185,129,0.10)]"
+        >
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-black text-gray-900">
-                About Me
-              </h2>
-
-              <p className="mt-1 text-xs text-gray-400">
-                You can edit your bio.
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-600">
+                Wallet
               </p>
+              <h2 className="mt-1 text-lg font-black">Your Balance</h2>
             </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-lg">
+              💳
+            </div>
+          </div>
 
-            <span className="text-xs font-bold text-gray-400">
-              {bio.length}/30
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-2xl bg-slate-50 p-3">
+              <p className="text-[10px] font-bold text-slate-400">DEPOSIT</p>
+              <p className="mt-1 text-sm font-black">₹{Number(wallet.deposit_balance || 0).toFixed(0)}</p>
+            </div>
+            <div className="rounded-2xl bg-emerald-50 p-3">
+              <p className="text-[10px] font-bold text-emerald-600">BONUS</p>
+              <p className="mt-1 text-sm font-black">₹{Number(wallet.bonus_balance || 0).toFixed(0)}</p>
+            </div>
+            <div className="rounded-2xl bg-red-50 p-3">
+              <p className="text-[10px] font-bold text-red-500">WINNING</p>
+              <p className="mt-1 text-sm font-black">₹{Number(wallet.winning_balance || 0).toFixed(0)}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between border-t border-emerald-50 pt-3">
+            <span className="text-xs font-bold text-slate-400">Tap to open wallet</span>
+            <span className="text-sm font-black text-emerald-600">View Wallet →</span>
+          </div>
+        </button>
+
+        {/* Personal information */}
+        <section className="mt-5 rounded-[28px] border border-emerald-100 bg-white p-5 shadow-[0_12px_35px_rgba(15,23,42,0.06)]">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-600">
+            Personal details
+          </p>
+
+          <div className="mt-4 space-y-3">
+            <InfoRow icon="✉️" label="Email" value={profile.email || "Not added"} />
+            <InfoRow icon="📱" label="Phone" value={profile.phone || "Not added"} />
+            <button
+              type="button"
+              onClick={shareReferralCode}
+              className="flex w-full items-center gap-3 rounded-2xl bg-[#f8fcfa] p-3 text-left transition active:scale-[0.99] hover:bg-emerald-50"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-lg shadow-sm">
+                🎟️
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Referral Code
+                </p>
+                <p className="mt-0.5 truncate text-sm font-black text-slate-800">
+                  {profile.referralCode || "—"}
+                </p>
+              </div>
+              <span className="rounded-xl bg-emerald-100 px-3 py-2 text-xs font-black text-emerald-700">
+                {copied ? "Copied!" : "Share"}
+              </span>
+            </button>
+          </div>
+        </section>
+
+        {/* Bio editor */}
+        <section className="mt-5 rounded-[28px] border border-emerald-100 bg-white p-5 shadow-[0_12px_35px_rgba(15,23,42,0.06)]">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-600">
+                About you
+              </p>
+              <h2 className="mt-1 text-lg font-black">Your Bio</h2>
+            </div>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold text-emerald-700">
+              EDITABLE
             </span>
           </div>
 
-          <input
+          <textarea
             value={bio}
-            onChange={handleBioChange}
-            maxLength={30}
-            placeholder="Write something about you..."
-            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-sm font-medium text-gray-900 outline-none transition focus:border-red-400 focus:bg-white"
+            onChange={(e) => setBio(e.target.value)}
+            maxLength={120}
+            placeholder="Write something about yourself..."
+            className="mt-4 min-h-[100px] w-full resize-none rounded-2xl border border-emerald-100 bg-[#f8fcfa] p-4 text-sm outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50"
           />
 
-          <button
-            type="button"
-            onClick={saveBio}
-            disabled={savingBio}
-            className="mt-3 w-full rounded-2xl bg-red-600 py-3.5 font-bold text-white shadow-lg shadow-red-100 transition active:scale-[0.98] disabled:opacity-60"
-          >
-            {savingBio ? "Saving..." : "Save Bio"}
-          </button>
-        </section>
-
-        {/* REFERRAL */}
-        <section className="mt-5 rounded-3xl bg-gradient-to-br from-green-50 to-white p-5 shadow-lg border border-green-100">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-green-600">
-                Refer & Earn
-              </p>
-
-              <h2 className="mt-1 text-xl font-black text-gray-900">
-                Invite your friends
-              </h2>
-
-              <p className="mt-1 text-sm text-gray-500">
-                Share your unique referral code.
-              </p>
-            </div>
-
-            <div className="text-3xl">
-              🎁
-            </div>
-          </div>
-
-          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-green-200 bg-white p-2">
-            <div className="flex-1 px-3 py-2">
-              <p className="text-[10px] font-bold uppercase text-gray-400">
-                Your Code
-              </p>
-
-              <p className="mt-1 text-lg font-black tracking-widest text-green-700">
-                {profile.referralCode || "—"}
-              </p>
-            </div>
-
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-xs text-slate-400">{bio.length}/120</span>
             <button
-              type="button"
-              onClick={copyReferral}
-              className="rounded-xl bg-green-100 px-4 py-3 text-sm font-bold text-green-700"
+              onClick={saveBio}
+              disabled={saving}
+              className="rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-emerald-200 transition active:scale-95 disabled:opacity-60"
             >
-              Copy
+              {saving ? "Saving..." : "Save Changes"}
             </button>
           </div>
-
-          <button
-            type="button"
-            onClick={shareReferral}
-            className="mt-3 w-full rounded-2xl bg-green-600 py-3.5 font-bold text-white shadow-lg shadow-green-100 transition active:scale-[0.98]"
-          >
-            📤 Share Referral
-          </button>
         </section>
-
-        {/* WALLET */}
-        <section className="mt-5 rounded-3xl bg-white p-5 shadow-xl border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-red-500">
-                My Wallet
-              </p>
-
-              <h2 className="mt-1 text-xl font-black text-gray-900">
-                {formatMoney(wallet.total)}
-              </h2>
-
-              <p className="text-xs text-gray-400">
-                Total wallet balance
-              </p>
-            </div>
-
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-green-100 text-2xl">
-              💰
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-3 gap-2">
-
-            <WalletBox
-              title="Deposit"
-              value={wallet.deposit}
-              icon="💳"
-            />
-
-            <WalletBox
-              title="Bonus"
-              value={wallet.bonus}
-              icon="🎁"
-            />
-
-            <WalletBox
-              title="Winning"
-              value={wallet.winning}
-              icon="🏆"
-            />
-
-          </div>
-
-          <Link
-            href="/wallet"
-            className="mt-4 block rounded-2xl bg-gray-900 py-3.5 text-center font-bold text-white shadow-lg transition active:scale-[0.98]"
-          >
-            View Wallet
-          </Link>
-        </section>
-
       </div>
     </main>
   );
 }
 
-function ReadOnlyField({
+function InfoRow({
+  icon,
   label,
   value,
 }: {
+  icon: string;
   label: string;
   value: string;
 }) {
   return (
-    <div>
-      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-400">
-        {label}
-      </label>
-
-      <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3.5 text-sm font-semibold text-gray-700">
-        {value || "Not provided"}
-      </div>
-    </div>
-  );
-}
-
-function WalletBox({
-  title,
-  value,
-  icon,
-}: {
-  title: string;
-  value: number;
-  icon: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
-      <div className="text-lg">
+    <div className="flex items-center gap-3 rounded-2xl bg-[#f8fcfa] p-3">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm">
         {icon}
       </div>
-
-      <p className="mt-2 text-[11px] font-bold text-gray-400">
-        {title}
-      </p>
-
-      <p className="mt-1 text-sm font-black text-gray-900">
-        ₹{value.toFixed(2)}
-      </p>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          {label}
+        </p>
+        <p className="mt-0.5 truncate text-sm font-bold text-slate-800">
+          {value}
+        </p>
+      </div>
     </div>
   );
 }

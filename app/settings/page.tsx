@@ -1,140 +1,59 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function SettingsPage() {
   const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
 
-  const logout = async () => {
-    const ok = window.confirm("Are you sure you want to logout?");
-    if (!ok) return;
+  async function logout() {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
 
     try {
       await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "include",
       });
-    } catch {}
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      try {
+        window.localStorage.removeItem("gamerzadda_device_id");
+      } catch {}
 
-    try {
-      localStorage.removeItem("gamerzadda_device_id");
-    } catch {}
-
-    router.replace("/login");
-  };
+      router.replace("/login");
+    }
+  }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#0b0f14",
-        color: "#fff",
-        padding: "20px",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 700,
-          margin: "0 auto",
-        }}
-      >
-        <button
-          onClick={() => router.back()}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "#fff",
-            fontSize: 24,
-            cursor: "pointer",
-            marginBottom: 20,
-          }}
-        >
-          ←
-        </button>
-
-        <h1 style={{ fontSize: 28, marginBottom: 25 }}>Settings</h1>
-
-        <div
-          onClick={() => router.push("/profile")}
-          style={{
-            padding: 18,
-            background: "#151b23",
-            borderRadius: 14,
-            marginBottom: 12,
-            cursor: "pointer",
-          }}
-        >
-          👤 My Profile
+    <main className="min-h-screen bg-[#070b18] text-white">
+      <header className="sticky top-0 z-50 bg-gradient-to-r from-[#ff174f] via-[#ed1749] to-[#ff2857] px-4 py-4 shadow-xl">
+        <div className="mx-auto flex max-w-md items-center gap-3">
+          <button
+            onClick={() => router.back()}
+            className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#641d3b]/80 text-xl"
+            aria-label="Go back"
+          >
+            ←
+          </button>
+          <h1 className="text-xl font-black">Settings</h1>
         </div>
+      </header>
 
-        <div
-          onClick={() => router.push("/profile")}
-          style={{
-            padding: 18,
-            background: "#151b23",
-            borderRadius: 14,
-            marginBottom: 12,
-            cursor: "pointer",
-          }}
-        >
-          🎮 Game Account
-        </div>
-
-        <div
-          onClick={() => router.push("/profile")}
-          style={{
-            padding: 18,
-            background: "#151b23",
-            borderRadius: 14,
-            marginBottom: 12,
-            cursor: "pointer",
-          }}
-        >
-          🔐 Security
-        </div>
-
-        <div
-          onClick={() => router.push("/referrals")}
-          style={{
-            padding: 18,
-            background: "#151b23",
-            borderRadius: 14,
-            marginBottom: 12,
-            cursor: "pointer",
-          }}
-        >
-          🎁 My Referrals
-        </div>
-
-        <div
-          onClick={() => router.push("/support")}
-          style={{
-            padding: 18,
-            background: "#151b23",
-            borderRadius: 14,
-            marginBottom: 25,
-            cursor: "pointer",
-          }}
-        >
-          💬 Help & Support
-        </div>
-
-        <button
-          onClick={logout}
-          style={{
-            width: "100%",
-            padding: 16,
-            borderRadius: 14,
-            border: "1px solid #ef4444",
-            background: "#35151a",
-            color: "#ff6b6b",
-            fontSize: 16,
-            fontWeight: 700,
-            cursor: "pointer",
-          }}
-        >
-          🚪 Logout
-        </button>
+      <div className="mx-auto max-w-md px-4 py-8">
+        <section className="rounded-2xl border border-red-500/20 bg-[#11182b] p-1">
+          <button
+            onClick={logout}
+            disabled={loggingOut}
+            className="flex w-full items-center gap-4 rounded-xl px-5 py-4 text-left font-bold text-red-400 transition hover:bg-red-500/10 disabled:opacity-60"
+          >
+            <span className="text-xl">🚪</span>
+            <span>{loggingOut ? "Logging out..." : "Logout"}</span>
+          </button>
+        </section>
       </div>
     </main>
   );

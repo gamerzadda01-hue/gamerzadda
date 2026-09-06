@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const MIN_WITHDRAWAL = 50;
 const SERVICE_CHARGE = 5;
@@ -14,6 +15,7 @@ type Wallet = {
 };
 
 export default function WithdrawPage() {
+  const router = useRouter();
   const [wallet, setWallet] = useState<Wallet>({
     deposit: 0,
     bonus: 0,
@@ -23,11 +25,12 @@ export default function WithdrawPage() {
 
   const [amount, setAmount] = useState("");
   const [upiId, setUpiId] = useState("");
+  const [upiHolderName, setUpiHolderName] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
-  const [todayWithdrawals, setTodayWithdrawals] = useState(0);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     loadWallet();
@@ -58,18 +61,6 @@ export default function WithdrawPage() {
           total: 0,
         }
       );
-
-      const withdrawalInfoResponse = await fetch("/api/wallet/withdraw", {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      if (withdrawalInfoResponse.ok) {
-        const withdrawalInfo = await withdrawalInfoResponse.json();
-        setTodayWithdrawals(Number(withdrawalInfo.todayWithdrawals || 0));
-      } else {
-        setTodayWithdrawals(0);
-      }
     } catch {
       setError("Unable to load wallet.");
     } finally {
@@ -84,9 +75,8 @@ export default function WithdrawPage() {
       return 0;
     }
 
-    const serviceCharge = todayWithdrawals === 0 ? 5 : 10;
-    return Math.max(0, numericAmount - serviceCharge);
-  }, [numericAmount, todayWithdrawals]);
+    return Math.max(0, numericAmount - SERVICE_CHARGE);
+  }, [numericAmount]);
 
   function setQuickAmount(value: number) {
     setAmount(String(value));
@@ -112,6 +102,14 @@ export default function WithdrawPage() {
       return "Insufficient winning balance.";
     }
 
+    if (!upiHolderName.trim()) {
+      return "UPI holder name is required.";
+    }
+
+    if (upiHolderName.trim().length < 2) {
+      return "Enter a valid UPI holder name.";
+    }
+
     if (!upiId.trim()) {
       return "UPI ID is required.";
     }
@@ -127,7 +125,20 @@ export default function WithdrawPage() {
     return "";
   }
 
-  async function handleWithdraw() {
+  function handleWithdraw() {
+    setError("");
+
+    const validationError = validateForm();
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setShowConfirm(true);
+  }
+
+  async function submitWithdrawal() {
     setError("");
 
     const validationError = validateForm();
@@ -148,38 +159,21 @@ export default function WithdrawPage() {
         body: JSON.stringify({
           amount: numericAmount,
           upiId: upiId.trim(),
+          upiHolderName: upiHolderName.trim(),
         }),
       });
 
-      const responseText = await response.text();
-
-      let data: any = {};
-
-      try {
-        data = responseText ? JSON.parse(responseText) : {};
-      } catch {
-        console.error(
-          "Withdrawal API raw response:",
-          responseText
-        );
-
-        setError(
-          `Withdrawal server response error (${response.status}).`
-        );
-        return;
-      }
+      const data = await response.json();
 
       if (!response.ok) {
-        setError(
-          data?.error ||
-            `Withdrawal request failed (${response.status}).`
-        );
+        setError(data.error || "Withdrawal request failed.");
         return;
       }
 
       // Clear form
       setAmount("");
       setUpiId("");
+      setUpiHolderName("");
 
       // Refresh wallet
       await loadWallet();
@@ -199,19 +193,30 @@ export default function WithdrawPage() {
     <main className="min-h-screen bg-[#f5f8f5] text-[#18221c]">
       {/* HEADER */}
       <header className="border-b border-[#dfe8e1] bg-white">
-        <div className="mx-auto flex h-14 max-w-xl items-center justify-between px-4">
-          <Link
-            href="/wallet"
-            className="text-sm font-bold text-[#59635c]"
+        <div className="mx-auto flex h-14 max-w-xl items-center gap-3 px-4">
+          <button
+            onClick={() => router.back()}
+            aria-label="Go back"
+            className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
           >
-            ← Wallet
-          </Link>
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </span>
+          </button>
 
           <h1 className="text-base font-extrabold">
             Withdraw
           </h1>
-
-          <div className="w-14" />
         </div>
       </header>
 
@@ -312,39 +317,23 @@ export default function WithdrawPage() {
             />
           </div>
 
-          {/* SUMMARY */}
-          <div className="mt-4 rounded-xl bg-[#f7faf7] p-4">
-            <div className="flex justify-between text-xs">
-              <span className="text-[#747e76]">
-                Withdrawal Amount
-              </span>
+          {/* UPI HOLDER NAME */}
+          <div className="mt-4">
+            <label className="mb-2 block text-xs font-bold text-[#465148]">
+              UPI Holder Name
+            </label>
 
-              <span className="font-bold">
-                ₹{Number(numericAmount || 0).toFixed(2)}
-              </span>
-            </div>
-
-            <div className="mt-2 flex justify-between text-xs">
-              <span className="text-[#747e76]">
-                Service Charge
-              </span>
-
-              <span className="font-bold text-[#d32f2f]">
-                -₹{(todayWithdrawals === 0 ? 5 : 10).toFixed(2)}
-              </span>
-            </div>
-
-            <div className="my-3 border-t border-[#e1e7e2]" />
-
-            <div className="flex justify-between">
-              <span className="text-sm font-extrabold">
-                You&apos;ll Receive
-              </span>
-
-              <span className="text-lg font-black text-[#25803c]">
-                ₹{receiveAmount.toFixed(2)}
-              </span>
-            </div>
+            <input
+              type="text"
+              value={upiHolderName}
+              onChange={(e) => {
+                setUpiHolderName(e.target.value);
+                setError("");
+              }}
+              placeholder="Enter UPI account holder name"
+              autoComplete="name"
+              className="w-full rounded-xl border border-[#dce3de] bg-[#fafcfb] px-4 py-3.5 font-semibold outline-none focus:border-[#83c792] focus:ring-4 focus:ring-[#e4f5e7]"
+            />
           </div>
 
           {/* BUTTON */}
@@ -356,14 +345,107 @@ export default function WithdrawPage() {
           >
             {submitting
               ? "Submitting..."
-              : "Request Withdrawal"}
+              : "Withdraw"}
           </button>
 
-          <p className="mt-3 text-center text-[10px] text-[#89918b]">
-            1st withdrawal of the day: ₹5 charge. 2nd onward: ₹10 charge.
-          </p>
         </section>
       </div>
+
+      {/* CONFIRM WITHDRAWAL POPUP */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-5 backdrop-blur-[2px]">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-2xl text-red-600">
+              💸
+            </div>
+
+            <h2 className="mt-4 text-center text-xl font-black text-[#18221c]">
+              Are you sure you want to withdraw?
+            </h2>
+
+            <div className="mt-4 rounded-2xl border border-emerald-100 bg-[#f7faf7] p-4">
+              <p className="mb-3 text-[10px] font-black uppercase tracking-wider text-[#89918b]">
+                Withdrawal Details
+              </p>
+
+              <div className="rounded-xl border border-emerald-100 bg-white px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-[#747e76]">
+                    UPI Holder
+                  </span>
+                  <span className="max-w-[190px] truncate text-right text-sm font-black text-[#18221c]">
+                    {upiHolderName.trim()}
+                  </span>
+                </div>
+
+                <div className="mt-2 border-t border-[#edf1ed] pt-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold text-[#747e76]">
+                      UPI ID
+                    </span>
+                    <span className="max-w-[190px] truncate text-right text-sm font-black text-[#18221c]">
+                      {upiId.trim()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-2 flex justify-between text-sm">
+                <span className="text-[#747e76]">Withdrawal Amount</span>
+                <span className="font-bold">
+                  ₹{Number(numericAmount || 0).toFixed(2)}
+                </span>
+              </div>
+
+              <div className="mt-2 flex justify-between text-sm">
+                <span className="text-[#747e76]">Service Charge</span>
+                <span className="font-bold text-[#d32f2f]">-₹5.00</span>
+              </div>
+
+              <div className="my-3 border-t border-[#e1e7e2]" />
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-extrabold">You&apos;ll Receive</span>
+                <span className="text-xl font-black text-[#25803c]">
+                  ₹{receiveAmount.toFixed(2)}
+                </span>
+              </div>
+
+              <div className="mt-3 rounded-xl bg-[#edfaef] px-3 py-2.5">
+                <p className="text-center text-[11px] font-bold leading-5 text-[#25803c]">
+                  Money will be credited to this UPI within 30 mins after processing.
+                </p>
+              </div>
+            </div>
+
+            <p className="mt-3 text-center text-[10px] font-semibold text-[#89918b]">
+              Please verify your UPI ID and amount before confirming.
+            </p>
+
+            <div className="flex items-center gap-3">
+<button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                disabled={submitting}
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 text-sm font-extrabold text-gray-700 transition hover:bg-gray-100 active:scale-[0.99] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+<button
+                type="button"
+                onClick={async () => {
+                  setShowConfirm(false);
+                  await submitWithdrawal();
+                }}
+                disabled={submitting}
+                className="w-full rounded-xl bg-[#d83232] py-3 text-sm font-extrabold text-white transition hover:bg-[#c92b2b] active:scale-[0.99] disabled:opacity-50"
+              >
+                {submitting ? "Submitting..." : "Withdraw"}
+              </button>
+</div>
+          </div>
+        </div>
+      )}
 
       {/* SUCCESS POPUP */}
       {showSuccess && (
@@ -385,7 +467,7 @@ export default function WithdrawPage() {
 
             <div className="mt-4 rounded-xl bg-[#edfaef] px-4 py-3">
               <p className="text-sm font-bold text-[#25803c]">
-                Your amount will be credited to your bank/UPI account within 30 minutes.
+                Money will be credited in your bank UPI within 30 mins.
               </p>
             </div>
 

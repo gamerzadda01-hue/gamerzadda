@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Transaction = {
   id: string;
@@ -30,6 +31,7 @@ type Wallet = {
 };
 
 export default function WalletPage() {
+  const router = useRouter();
   const [wallet, setWallet] = useState<Wallet>({
     deposit: 0,
     bonus: 0,
@@ -103,6 +105,30 @@ export default function WalletPage() {
     return `₹${Number(amount || 0).toFixed(2)}`;
   }
 
+  function getTransactionTitle(transaction: Transaction) {
+    const raw = `${transaction.type || ""} ${transaction.description || ""}`.toLowerCase();
+
+    if (raw.includes("join") || raw.includes("entry") || raw.includes("tournament")) {
+      if (raw.includes("join") || raw.includes("entry") || Number(transaction.amount) < 0) {
+        return "Tournament Joining Fee";
+      }
+    }
+
+    if (raw.includes("deposit") || raw.includes("add money") || raw.includes("topup") || raw.includes("top-up")) {
+      return "Add Money";
+    }
+
+    if (raw.includes("withdraw")) {
+      return "Withdrawal";
+    }
+
+    if (raw.includes("win") || raw.includes("prize") || raw.includes("reward")) {
+      return "Tournament Winning";
+    }
+
+    return transaction.description || transaction.type || "Wallet Transaction";
+  }
+
   function getStatusClass(status: string) {
     const value = status.toLowerCase();
 
@@ -111,7 +137,7 @@ export default function WalletPage() {
       value === "success" ||
       value === "completed"
     ) {
-      return "text-green-400";
+      return "text-emerald-600";
     }
 
     if (
@@ -119,85 +145,67 @@ export default function WalletPage() {
       value === "failed" ||
       value === "cancelled"
     ) {
-      return "text-red-400";
+      return "text-red-600";
     }
 
-    return "text-yellow-400";
+    return "text-amber-600";
   }
 
   return (
-    <main className="min-h-screen bg-[#070b12] text-white">
+    <main className="min-h-screen bg-[#f4fbf7] text-slate-900">
       {/* HEADER */}
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#090d15]/95 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-          <Link
-            href="/"
-            className="flex items-center gap-2 text-sm font-semibold text-gray-300"
+      <header className="sticky top-0 z-50 border-b border-emerald-100 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-md items-center justify-between px-4">
+          <button
+            onClick={() => router.back()}
+            aria-label="Go back"
+            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
           >
-            <span className="text-xl">←</span>
-            Home
-          </Link>
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </span>
+          </button>
 
-          <h1 className="text-lg font-bold">
-            My <span className="text-green-400">Wallet</span>
+          <h1 className="text-lg font-black tracking-tight text-slate-900">
+            My <span className="text-emerald-600">Wallet</span>
           </h1>
 
-          <button
-            type="button"
-            onClick={loadWallet}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-gray-300"
-          >
-            ↻
-          </button>
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 pb-10 pt-5">
+      <div className="mx-auto max-w-md px-4 pb-6 pt-3">
         {/* ERROR */}
         {error && (
-          <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-600">
             {error}
           </div>
         )}
 
         {/* TOTAL BALANCE */}
-        <section className="relative overflow-hidden rounded-2xl border border-green-500/20 bg-gradient-to-br from-[#102319] via-[#0d1715] to-[#091016] p-6 shadow-xl">
-          <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-green-400/10 blur-2xl" />
+        <section className="relative overflow-hidden rounded-[24px] border border-red-200 bg-gradient-to-br from-[#ff174f] via-[#ed1749] to-[#ff5b72] p-5 text-white shadow-xl shadow-red-200/50">
+          <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/15 blur-2xl" />
 
-          <p className="text-sm text-gray-400">Total Balance</p>
+          <p className="text-sm font-semibold text-white/80">Total Balance</p>
 
           <div className="mt-2 text-4xl font-extrabold tracking-tight">
             {loading ? "₹..." : formatAmount(wallet.total)}
           </div>
 
-          <div className="mt-5 flex gap-3">
-            {/* ADD MONEY */}
-            <button
-              type="button"
-              onClick={openDepositPage}
-              disabled={loading}
-              className="flex-1 cursor-pointer rounded-xl bg-green-500 px-4 py-3 text-sm font-bold text-black transition hover:bg-green-400 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              + Add Money
-            </button>
 
-            {/* WITHDRAW */}
-            <button
-              type="button"
-              onClick={openWithdrawPage}
-              className="flex-1 cursor-pointer rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-center text-sm font-bold text-white transition hover:bg-white/10 active:scale-[0.98]"
-            >
-              Withdraw
-            </button>
-          </div>
-
-          <p className="mt-3 text-center text-[11px] text-gray-500">
-            Add Money & withdrawal are available.
-          </p>
         </section>
 
         {/* BALANCE BREAKDOWN */}
-        <section className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <section className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
           <BalanceCard
             icon="💵"
             title="Deposit"
@@ -217,19 +225,42 @@ export default function WalletPage() {
           />
         </section>
 
-        {/* TRANSACTIONS */}
-        <section className="mt-7">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-bold">Transactions</h2>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {/* ADD MONEY */}
+            <button
+              type="button"
+              onClick={openDepositPage}
+              disabled={loading}
+              className="group flex min-h-[50px] cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-emerald-300/40 bg-gradient-to-br from-emerald-300 to-emerald-500 px-3 py-2.5 text-xs font-black text-slate-950 shadow-lg shadow-emerald-950/20 transition hover:-translate-y-0.5 hover:shadow-xl active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              + Add Money
+            </button>
 
-            <span className="text-xs text-gray-500">
+            {/* WITHDRAW */}
+            <button
+              type="button"
+              onClick={openWithdrawPage}
+              className="group flex min-h-[50px] items-center justify-center gap-1.5 rounded-xl border border-white/70 bg-white px-4 py-3 text-center text-sm font-black text-red-600 shadow-lg shadow-red-950/10 transition hover:-translate-y-0.5 hover:bg-red-50 hover:shadow-xl active:scale-[0.98]"
+            >
+              Withdraw
+            </button>
+          </div>
+
+
+
+        {/* TRANSACTIONS */}
+        <section className="mt-5">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-lg font-black text-slate-900">Wallet Transactions</h2>
+
+            <span className="text-xs font-semibold text-slate-500">
               Latest 50
             </span>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0c111a]">
+          <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
             {loading ? (
-              <div className="p-8 text-center text-sm text-gray-500">
+              <div className="p-5 text-center text-sm text-slate-500">
                 Loading transactions...
               </div>
             ) : transactions.length === 0 ? (
@@ -239,7 +270,7 @@ export default function WalletPage() {
                 text="Your wallet transactions will appear here."
               />
             ) : (
-              <div className="divide-y divide-white/5">
+              <div className="divide-y divide-emerald-50">
                 {transactions.map((transaction) => {
                   const positive = Number(transaction.amount) >= 0;
 
@@ -252,21 +283,21 @@ export default function WalletPage() {
                         <div
                           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
                             positive
-                              ? "bg-green-500/10"
-                              : "bg-red-500/10"
+                              ? "bg-emerald-50"
+                              : "bg-red-50"
                           }`}
                         >
                           {positive ? "↓" : "↑"}
                         </div>
 
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">
+                          <p className="truncate text-sm font-bold text-slate-800">
                             {transaction.description ||
                               transaction.type ||
                               "Wallet transaction"}
                           </p>
 
-                          <p className="mt-1 text-[11px] text-gray-500">
+                          <p className="mt-1 text-[11px] text-white/70">
                             {formatDate(transaction.created_at)}
                           </p>
                         </div>
@@ -275,8 +306,8 @@ export default function WalletPage() {
                       <div
                         className={`shrink-0 text-sm font-bold ${
                           positive
-                            ? "text-green-400"
-                            : "text-red-400"
+                            ? "text-emerald-600"
+                            : "text-red-600"
                         }`}
                       >
                         {positive ? "+" : ""}
@@ -290,80 +321,7 @@ export default function WalletPage() {
           </div>
         </section>
 
-        {/* WITHDRAWAL HISTORY */}
-        <section className="mt-7">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-bold">
-              Withdrawal History
-            </h2>
 
-            <span className="text-xs text-gray-500">
-              Latest 50
-            </span>
-          </div>
-
-          <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0c111a]">
-            {loading ? (
-              <div className="p-8 text-center text-sm text-gray-500">
-                Loading withdrawals...
-              </div>
-            ) : withdrawals.length === 0 ? (
-              <EmptyState
-                icon="💸"
-                title="No withdrawals yet"
-                text="Your withdrawal requests will appear here."
-              />
-            ) : (
-              <div className="divide-y divide-white/5">
-                {withdrawals.map((withdrawal) => (
-                  <div
-                    key={withdrawal.id}
-                    className="p-4"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold">
-                          Withdrawal
-                        </p>
-
-                        <p className="mt-1 text-xs text-gray-500">
-                          UPI: {withdrawal.upi_id}
-                        </p>
-
-                        <p className="mt-1 text-[11px] text-gray-600">
-                          {formatDate(withdrawal.created_at)}
-                        </p>
-                      </div>
-
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-white">
-                          {formatAmount(withdrawal.amount)}
-                        </p>
-
-                        <p
-                          className={`mt-1 text-xs font-semibold capitalize ${getStatusClass(
-                            withdrawal.status
-                          )}`}
-                        >
-                          {withdrawal.status}
-                        </p>
-                      </div>
-                    </div>
-
-                    {withdrawal.admin_note && (
-                      <div className="mt-3 rounded-lg bg-white/5 p-3 text-xs text-gray-400">
-                        <span className="font-semibold text-gray-300">
-                          Admin note:
-                        </span>{" "}
-                        {withdrawal.admin_note}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
       </div>
     </main>
   );
@@ -379,18 +337,18 @@ function BalanceCard({
   amount: number;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0c111a] p-4">
+    <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-lg">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-lg">
           {icon}
         </div>
 
         <div>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs font-semibold text-slate-500">
             {title}
           </p>
 
-          <p className="mt-1 text-lg font-bold">
+          <p className="mt-1 text-lg font-black text-slate-900">
             ₹{Number(amount || 0).toFixed(2)}
           </p>
         </div>
@@ -409,14 +367,14 @@ function EmptyState({
   text: string;
 }) {
   return (
-    <div className="p-8 text-center">
+    <div className="p-5 text-center">
       <div className="text-3xl">{icon}</div>
 
-      <p className="mt-3 text-sm font-semibold text-gray-300">
+      <p className="mt-3 text-sm font-bold text-slate-700">
         {title}
       </p>
 
-      <p className="mt-1 text-xs text-gray-500">
+      <p className="mt-1 text-xs font-semibold text-slate-500">
         {text}
       </p>
     </div>

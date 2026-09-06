@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 export default function DepositPage() {
+  const router = useRouter();
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -191,12 +193,25 @@ export default function DepositPage() {
 
       <header className="border-b border-[#dfe8e1] bg-white">
         <div className="mx-auto flex h-14 max-w-xl items-center justify-between px-4">
-          <Link
-            href="/wallet"
-            className="text-sm font-bold text-[#59635c]"
+          <button
+            onClick={() => router.back()}
+            aria-label="Go back"
+            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
           >
-            ← Wallet
-          </Link>
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </span>
+          </button>
 
           <h1 className="text-base font-extrabold">
             Add Money
@@ -224,10 +239,6 @@ export default function DepositPage() {
         <section className="rounded-2xl border border-[#cfe6d4] bg-[#edfaef] p-5">
           <p className="text-xs font-semibold text-[#657169]">
             Add money to your GamerzAdda wallet
-          </p>
-
-          <p className="mt-1 text-sm text-[#718078]">
-            Secure payment powered by Pay0.
           </p>
 
           {!settingsLoading && (
