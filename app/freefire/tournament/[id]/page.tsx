@@ -1,29 +1,443 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+
+const BANNER_URL = "/banner.png";
 
 export default function TournamentPage() {
+  const router = useRouter();
   const [popup, setPopup] = useState<"how" | "rules" | "join" | null>(null);
   const [gameName, setGameName] = useState("");
   const [uid, setUid] = useState("");
   const [level, setLevel] = useState("");
   const [walletOpen, setWalletOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [joinError, setJoinError] = useState("");
+  const [insufficientBalanceOpen, setInsufficientBalanceOpen] = useState(false);
   const [joined, setJoined] = useState(false);
   const [slideValue, setSlideValue] = useState(0);
+  const [joining, setJoining] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelModal, setCancelModal] = useState<"notice" | "success" | "error" | null>(null);
+  const [cancelModalMessage, setCancelModalMessage] = useState("");
+  const [pendingCancelEntryId, setPendingCancelEntryId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (cancelModal !== "success") return;
+    const timer = window.setTimeout(() => setCancelModal(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [cancelModal]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [cancelTick, setCancelTick] = useState(Date.now());
   const sliderRef = useRef<HTMLDivElement>(null);
 
-  // Frontend-only demo wallet. Replace with backend values later.
-  const availableBalance = 500;
-  const entryFee = 34;
-  const balanceAfterJoin = availableBalance - entryFee;
+  type TournamentData = {
+    id: string;
+    title: string;
+    game: string | null;
+    mode: string | null;
+    entry_fee: number | string | null;
+    prize_pool: number | string | null;
+    kill_reward: number | string | null;
+    max_players: number | null;
+    start_time: string | null;
+    map: string | null;
+    rules: string[] | null;
+    status: string | null;
+    bonus_usable_percent: number | string | null;
+  };
 
-  const openJoinPopup = () => {
+  type PrizeData = {
+    id: string;
+    rank: number;
+    label: string;
+    amount: number | string;
+  };
+
+  type ParticipantData = {
+    id: string;
+    user_id: string;
+    free_fire_uid: string | null;
+    game_name: string | null;
+    cancelled: boolean | null;
+    users: {
+      full_name: string | null;
+      level: number | null;
+      bio: string | null;
+      avatar_url: string | null;
+    } | null;
+  };
+
+  type WalletData = {
+    deposit_balance: number | null;
+    bonus_balance: number | null;
+    winning_balance: number | null;
+  };
+
+  const [tournament, setTournament] = useState<TournamentData | null>(null);
+  const [wallet, setWallet] = useState<WalletData | null>(null);
+  const [walletLoading, setWalletLoading] = useState(true);
+  const [prizes, setPrizes] = useState<PrizeData[]>([]);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
+  const [joinedPlayers, setJoinedPlayers] = useState(0);
+  const [participantsOpen, setParticipantsOpen] = useState(false);
+  const [participants, setParticipants] = useState<ParticipantData[]>([]);
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [participantSearch, setParticipantSearch] = useState("");
+  const [participantsError, setParticipantsError] = useState("");
+
+  const depositBalance = Number(wallet?.deposit_balance ?? 0);
+  const bonusBalance = Number(wallet?.bonus_balance ?? 0);
+  const winningBalance = Number(wallet?.winning_balance ?? 0);
+  const totalWalletBalance = Math.max(
+    0,
+    depositBalance + bonusBalance + winningBalance
+  );
+  const entryFee = Number(tournament?.entry_fee ?? 0);
+
+  const bonusUsablePercent = Math.min(
+    100,
+    Math.max(0, Number(tournament?.bonus_usable_percent ?? 0))
+  );
+
+  const bonusUsable = Math.max(
+    0,
+    bonusBalance * (bonusUsablePercent / 100)
+  );
+
+  const tournamentUsableBalance =
+    depositBalance + winningBalance + bonusUsable;
+
+  const bonusCut = Math.min(bonusUsable, entryFee);
+  const remainingAfterBonus = Math.max(0, entryFee - bonusCut);
+
+  const depositCut = Math.min(depositBalance, remainingAfterBonus);
+  const remainingAfterDeposit = Math.max(
+    0,
+    remainingAfterBonus - depositCut
+  );
+
+  const winningCut = Math.min(winningBalance, remainingAfterDeposit);
+
+  const totalDeduction = bonusCut + depositCut + winningCut;
+
+  const balanceAfterJoin = Math.max(
+    0,
+    totalWalletBalance - totalDeduction
+  );
+
+  const loadCurrentUserForCancel = async () => {
+    if (!tournament?.id) return;
+
+    try {
+      const response = await fetch(
+        `/api/tournaments/my-entry?tournamentId=${encodeURIComponent(tournament.id)}`,
+        {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        }
+      );
+
+      const result = await response.json().catch(() => null);
+
+      if (response.ok && result?.success && result?.userId) {
+        setCurrentUserId(String(result.userId).trim());
+        setCurrentEntryId(
+          result.entryId ? String(result.entryId).trim() : null
+        );
+      }
+    } catch (error) {
+      console.error("Current user for cancel:", error);
+    }
+  };
+
+  async function loadParticipants() {
+    if (!tournament) return;
+
+    setParticipantsLoading(true);
+    setParticipantsError("");
+
+    try {
+      const { data, error } = await supabase
+        .from("tournament_entries")
+        .select(`
+          id,
+          user_id,
+          free_fire_uid,
+          game_name,
+          cancelled,
+          users (
+            full_name,
+            level,
+            bio,
+            avatar_url
+          )
+        `)
+        .eq("tournament_id", tournament.id)
+        .eq("cancelled", false)
+        .order("id", { ascending: true });
+
+      if (error) throw error;
+
+      // Supabase returns the related users row as an array here.
+      // Normalize it to the single-user shape used by the UI.
+      const normalizedParticipants: ParticipantData[] = (data || []).map((item) => {
+        const relatedUser = Array.isArray(item.users)
+          ? item.users[0] ?? null
+          : item.users ?? null;
+
+        return {
+          id: item.id,
+          user_id: item.user_id,
+          free_fire_uid: item.free_fire_uid ?? null,
+          game_name: item.game_name ?? null,
+          cancelled: Boolean(item.cancelled),
+          users: relatedUser
+            ? {
+                full_name: relatedUser.full_name ?? null,
+                level:
+                  relatedUser.level === null || relatedUser.level === undefined
+                    ? null
+                    : Number(relatedUser.level),
+                bio: relatedUser.bio ?? null,
+                avatar_url: relatedUser.avatar_url ?? null,
+              }
+            : null,
+        };
+      });
+
+      setParticipants(normalizedParticipants);
+    } catch (error) {
+      console.error("Participants:", error);
+      setParticipants([]);
+      setParticipantsError(
+        error instanceof Error ? error.message : "Unable to load participants."
+      );
+    } finally {
+      setParticipantsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSavedPlayerDetails() {
+      try {
+        const response = await fetch("/api/profile/player-details", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const result = await response.json().catch(() => null);
+
+        if (!active || !response.ok || !result?.success) return;
+
+        setGameName(String(result.gameName || "").toUpperCase().slice(0, 20));
+        setUid(String(result.uid || "").replace(/\\D/g, "").slice(0, 15));
+
+        const savedLevel = Number(result.level);
+        setLevel(
+          Number.isInteger(savedLevel) && savedLevel >= 1 && savedLevel <= 100
+            ? String(savedLevel)
+            : ""
+        );
+      } catch (error) {
+        console.error("Saved player details:", error);
+      }
+    }
+
+    loadSavedPlayerDetails();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    async function loadTournament() {
+      const id = window.location.pathname.split("/").filter(Boolean).pop();
+
+      if (!id) {
+        setPageError("Tournament ID is missing.");
+        setPageLoading(false);
+        return;
+      }
+
+      setPageLoading(true);
+      setPageError("");
+
+      try {
+        const { data, error } = await supabase
+          .from("tournaments")
+          .select(
+            "id,title,game,mode,entry_fee,prize_pool,kill_reward,max_players,start_time,map,rules,status,bonus_usable_percent"
+          )
+          .eq("id", id)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (!data) {
+          setPageError("Tournament not found.");
+          setTournament(null);
+          return;
+        }
+
+        setTournament(data as TournamentData);
+
+        const { count: entryCount, error: entriesError } = await supabase
+          .from("tournament_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("tournament_id", id)
+          .eq("cancelled", false);
+
+        if (entriesError) {
+          console.error("Tournament entries:", entriesError);
+          setJoinedPlayers(0);
+        } else {
+          setJoinedPlayers(entryCount ?? 0);
+        }
+
+        const { data: prizeData, error: prizeError } = await supabase
+          .from("tournament_prizes")
+          .select("id,rank,label,amount")
+          .eq("tournament_id", id)
+          .order("rank", { ascending: true });
+
+        if (prizeError) {
+          console.error("Tournament prizes:", prizeError);
+          setPrizes([]);
+        } else {
+          setPrizes((prizeData || []) as PrizeData[]);
+        }
+      } catch (error) {
+        console.error("Tournament detail:", error);
+        setPageError(
+          error instanceof Error ? error.message : "Unable to load tournament."
+        );
+        setTournament(null);
+      } finally {
+        setPageLoading(false);
+      }
+    }
+
+    loadTournament();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWallet() {
+      setWalletLoading(true);
+
+      try {
+        const response = await fetch("/api/wallet", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const walletData = await response.json();
+
+        if (!response.ok) {
+          throw new Error(walletData?.error || "Failed to load wallet.");
+        }
+
+        if (!cancelled) {
+          setWallet({
+            deposit_balance: Number(walletData?.wallet?.deposit ?? 0),
+            bonus_balance: Number(walletData?.wallet?.bonus ?? 0),
+            winning_balance: Number(walletData?.wallet?.winning ?? 0),
+          });
+        }
+      } catch (error) {
+        console.error("Wallet:", error);
+        setWallet(null);
+      } finally {
+        if (!cancelled) setWalletLoading(false);
+      }
+    }
+
+    loadWallet();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const openJoinPopup = async () => {
     setPopup("join");
     setWalletOpen(false);
     setJoinError("");
-    setJoined(false);
     setSlideValue(0);
+
+    // Refresh the latest account-wise player details before showing the form.
+    try {
+      const profileResponse = await fetch("/api/profile/player-details", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+      const profileResult = await profileResponse.json().catch(() => null);
+
+      if (profileResponse.ok && profileResult?.success) {
+        setGameName(String(profileResult.gameName || "").toUpperCase().slice(0, 20));
+        setUid(String(profileResult.uid || "").replace(/\\D/g, "").slice(0, 15));
+
+        const savedLevel = Number(profileResult.level);
+        setLevel(
+          Number.isInteger(savedLevel) && savedLevel >= 1 && savedLevel <= 100
+            ? String(savedLevel)
+            : ""
+        );
+      }
+    } catch (error) {
+      console.error("Refresh saved player details:", error);
+    }
+
+    // Always verify the current active entry from the server.
+    if (!tournament?.id) {
+      setJoined(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/tournaments/my-entry?tournamentId=${encodeURIComponent(
+          tournament.id
+        )}`,
+        {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        }
+      );
+
+      const result = await response.json().catch(() => null);
+
+      if (response.ok && result?.success && result?.joined) {
+        setJoined(true);
+        setCurrentUserId(
+          result.userId ? String(result.userId).trim() : null
+        );
+        setCurrentEntryId(
+          result.entryId ? String(result.entryId).trim() : null
+        );
+      } else {
+        setJoined(false);
+        setCurrentEntryId(null);
+      }
+    } catch (error) {
+      console.error("Join popup entry check:", error);
+      // Do not incorrectly show Already Joined if the check fails.
+      setJoined(false);
+      setCurrentEntryId(null);
+    }
   };
 
   const closePopup = () => {
@@ -57,7 +471,227 @@ export default function TournamentPage() {
     setJoinError("");
   };
 
-  const handleJoin = () => {
+  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadMyEntry() {
+      if (!tournament?.id) {
+        setCurrentUserId(null);
+        setCurrentEntryId(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/tournaments/my-entry?tournamentId=${encodeURIComponent(tournament.id)}`,
+          {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          }
+        );
+
+        const result = await response.json().catch(() => null);
+        if (!active) return;
+
+        if (response.ok && result?.success && result?.joined) {
+          setCurrentUserId(result.userId ? String(result.userId).trim() : null);
+          setCurrentEntryId(result.entryId ? String(result.entryId).trim() : null);
+        } else {
+          setCurrentUserId(null);
+          setCurrentEntryId(null);
+        }
+      } catch (error) {
+        console.error("My tournament entry:", error);
+        if (active) {
+          setCurrentUserId(null);
+          setCurrentEntryId(null);
+        }
+      }
+    }
+
+    loadMyEntry();
+
+    return () => {
+      active = false;
+    };
+  }, [tournament?.id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCancelTick(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const tournamentStartMs = tournament?.start_time
+    ? new Date(tournament.start_time).getTime()
+    : NaN;
+  const cancelDeadlineMs = Number.isFinite(tournamentStartMs)
+    ? tournamentStartMs - 2 * 60 * 60 * 1000
+    : NaN;
+  const canCancelTournament =
+    Number.isFinite(cancelDeadlineMs) &&
+    cancelTick < cancelDeadlineMs &&
+    !["cancelled", "completed", "live"].includes(
+      String(tournament?.status || "").toLowerCase()
+    );
+
+  const isOwnParticipant = (participant: ParticipantData) => {
+    if (
+      currentEntryId &&
+      String(currentEntryId).trim() === String(participant.id).trim()
+    ) {
+      return true;
+    }
+
+    if (!currentUserId || participant.user_id === null || participant.user_id === undefined) {
+      return false;
+    }
+
+    return String(currentUserId).trim() === String(participant.user_id).trim();
+  };
+
+  const handleCancelTournament = async (
+    entryId: string,
+    participantUserId: string
+  ) => {
+    if (!tournament || cancelling) return;
+
+    if (
+      !currentUserId ||
+      String(currentUserId).trim() !== String(participantUserId).trim()
+    ) {
+      setCancelModalMessage("You can cancel only your own tournament entry.");
+      setCancelModal("error");
+      return;
+    }
+
+    const startMs = tournament.start_time
+      ? new Date(tournament.start_time).getTime()
+      : NaN;
+
+    const cancelDeadlineMs = Number.isFinite(startMs)
+      ? startMs - 2 * 60 * 60 * 1000
+      : NaN;
+
+    if (!Number.isFinite(cancelDeadlineMs)) {
+      setCancelModalMessage("Cancellation time could not be verified. Please try again.");
+      setCancelModal("error");
+      return;
+    }
+
+    if (Date.now() >= cancelDeadlineMs) {
+      setCancelTick(Date.now());
+      setCancelModalMessage(
+        "Cancellation is LOCKED. Tournament entries cannot be cancelled within 2 hours of match time."
+      );
+      setCancelModal("error");
+      return;
+    }
+
+    // First custom popup.
+    setCancelModal("notice");
+
+    // Store the entry id for the second confirmation.
+    setPendingCancelEntryId(entryId);
+  };
+
+  const confirmCancelTournament = async () => {
+    if (!tournament || !pendingCancelEntryId || cancelling) return;
+
+    const entryId = pendingCancelEntryId;
+    setCancelling(true);
+    setCancelModal(null);
+
+    try {
+      const response = await fetch("/api/tournaments/cancel", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tournamentId: tournament.id,
+          entryId,
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to cancel tournament entry.");
+      }
+
+      // Remove cancelled player from the current UI immediately.
+      setParticipants((prev) =>
+        prev.filter((player) => player.id !== entryId)
+      );
+      setJoinedPlayers((count) => Math.max(0, count - 1));
+
+      // IMPORTANT:
+      // Reset all local entry state so the same tournament can be joined again
+      // without showing "Already Joined".
+      setJoined(false);
+      setCurrentEntryId(null);
+      setPendingCancelEntryId(null);
+      setSlideValue(0);
+
+      // Keep the latest player details saved in the account.
+      // They will automatically appear again for the next tournament.
+
+      // Update wallet immediately from the refund returned by the API.
+      if (result?.wallet) {
+        setWallet({
+          deposit_balance: Number(result.wallet.deposit ?? 0),
+          bonus_balance: Number(result.wallet.bonus ?? 0),
+          winning_balance: Number(result.wallet.winning ?? 0),
+        });
+      } else {
+        // Fallback: reload wallet if the API response does not contain it.
+        try {
+          const walletResponse = await fetch("/api/wallet", {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          });
+          const walletResult = await walletResponse.json().catch(() => null);
+
+          if (walletResponse.ok && walletResult?.wallet) {
+            setWallet({
+              deposit_balance: Number(walletResult.wallet.deposit ?? 0),
+              bonus_balance: Number(walletResult.wallet.bonus ?? 0),
+              winning_balance: Number(walletResult.wallet.winning ?? 0),
+            });
+          }
+        } catch (walletError) {
+          console.error("Wallet refresh after cancellation:", walletError);
+        }
+      }
+
+      setCancelModalMessage(
+        `Tournament entry cancelled successfully. 70% refund of ₹${Number(
+          result?.refund?.total ?? 0
+        ).toFixed(2)} has been added back to your wallet.`
+      );
+      setCancelModal("success");
+
+      // Close the success popup after 3 seconds.
+      window.setTimeout(() => {
+        setCancelModal(null);
+      }, 3000);
+    } catch (error) {
+      console.error("Cancel tournament entry:", error);
+      setCancelModalMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to cancel tournament entry."
+      );
+      setCancelModal("error");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleJoin = async () => {
     if (!gameName.trim()) {
       setJoinError("Please enter your In-Game Name.");
       return;
@@ -73,34 +707,168 @@ export default function TournamentPage() {
       return;
     }
 
-    if (availableBalance < entryFee) {
-      setJoinError("Insufficient wallet balance.");
+    if (walletLoading) {
+      setJoinError("Wallet is still loading. Please wait.");
       setSlideValue(0);
       return;
     }
 
-    setJoined(true);
-    setSlideValue(100);
+    if (tournamentUsableBalance < entryFee) {
+      setSlideValue(0);
+      return;
+    }
+
+    if (joining || !tournament) return;
+
+    setJoining(true);
     setJoinError("");
+    setSlideValue(100);
+
+    try {
+      const response = await fetch("/api/tournaments/join", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tournamentId: tournament.id,
+          gameName: gameName.trim(),
+          uid,
+          level: Number(level),
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (response.status === 402 || result?.code === "INSUFFICIENT_BALANCE") {
+        setSlideValue(0);
+        return;
+      }
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to join tournament.");
+      }
+
+      setWallet({
+        deposit_balance: Number(result.wallet?.deposit ?? 0),
+        bonus_balance: Number(result.wallet?.bonus ?? 0),
+        winning_balance: Number(result.wallet?.winning ?? 0),
+      });
+      setJoinedPlayers((count) => count + 1);
+      setJoined(true);
+
+      // Keep the real entry id so cancellation is tied to this exact entry.
+      if (result?.entry?.id || result?.entryId) {
+        setCurrentEntryId(
+          String(result.entry?.id ?? result.entryId).trim()
+        );
+      }
+
+      setJoinError("");
+    } catch (error) {
+      console.error("Tournament join:", error);
+      setSlideValue(0);
+      setJoinError(
+        error instanceof Error ? error.message : "Unable to join tournament."
+      );
+    } finally {
+      setJoining(false);
+    }
   };
+
+  if (pageLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f5f6f8] px-4">
+        <div className="rounded-2xl bg-white px-6 py-8 text-center shadow-sm">
+          <div className="text-lg font-black">Loading Tournament...</div>
+          <div className="mt-1 text-xs text-gray-400">Please wait</div>
+        </div>
+      </main>
+    );
+  }
+
+  if (pageError || !tournament) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f5f6f8] px-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-sm">
+          <div className="text-3xl">⚠️</div>
+          <h2 className="mt-3 text-lg font-black">Tournament Not Found</h2>
+          <p className="mt-1 text-xs text-gray-500">
+            {pageError || "This tournament may have been removed."}
+          </p>
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="mt-5 rounded-xl bg-[#ff174f] px-5 py-3 text-xs font-black text-white"
+          >
+            GO BACK
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  const startDate = tournament.start_time
+    ? new Date(tournament.start_time)
+    : null;
+
+  const formattedDate = startDate && !Number.isNaN(startDate.getTime())
+    ? startDate.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "Time TBA";
+
+  const formattedTime = startDate && !Number.isNaN(startDate.getTime())
+    ? startDate.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : "Time TBA";
+
+  const statusLabel = String(tournament.status || "upcoming").toUpperCase();
+  const maxPlayers = Number(tournament.max_players || 0);
+  const slotPercentage =
+    maxPlayers > 0 ? Math.min(100, (joinedPlayers / maxPlayers) * 100) : 0;
+
+  const tournamentRules =
+    Array.isArray(tournament.rules) && tournament.rules.length > 0
+      ? tournament.rules
+      : [
+          "Don't invite unregistered players.",
+          "Double Vector is not allowed.",
+          "Screen recording is mandatory.",
+          "Read all the rules before joining GamerzAdda tournaments.",
+        ];
 
   return (
     <main className="min-h-screen bg-[#f5f6f8] pb-24 text-gray-900">
 
       {/* HEADER */}
-      <header className="sticky top-0 z-40 bg-gradient-to-r from-red-700 via-red-600 to-red-500 px-4 py-4 text-white shadow-lg">
+      <header className="sticky top-0 z-40 bg-[#ff174f] px-4 py-4 text-white shadow-lg">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => window.history.back()}
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 text-xl"
-          >
-            ←
+          <button 
+            onClick={() => router.back()} 
+            aria-label="Go back" 
+            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95" 
+          > 
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100"> 
+              <svg 
+                viewBox="0 0 24 24" 
+                className="h-5 w-5" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2.4" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+              > 
+                <path d="M15 18l-6-6 6-6" /> 
+              </svg> 
+            </span> 
           </button>
 
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-red-100">
-              GamerzAdda
-            </p>
             <h1 className="text-lg font-black">
               Tournament Details
             </h1>
@@ -108,78 +876,114 @@ export default function TournamentPage() {
         </div>
       </header>
 
-      {/* TOURNAMENT HERO */}
+      {/* TOURNAMENT BANNER + DETAILS */}
       <section className="px-3 pt-3">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-red-700 via-red-600 to-orange-500 p-5 text-white shadow-xl">
-          <div className="absolute -right-8 -top-8 text-8xl opacity-20">
-            🔥
-          </div>
-
-          <div className="relative">
-            <span className="rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase">
-              Free Fire • Solo
-            </span>
-
-            <h2 className="mt-4 text-2xl font-black leading-tight">
-              Venom Survival Battle 🔥
-            </h2>
-
-            <p className="mt-1 text-xs font-semibold text-red-100">
-              Play smart. Survive longer. Win bigger.
-            </p>
-
-            <div className="mt-5 flex items-center justify-between">
+        <div className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-xl">
+          {/* Banner */}
+          {/* TOURNAMENT RULES */}
+          <div className="overflow-hidden rounded-2xl border border-red-100 bg-white">
+            <div className="flex items-center justify-between bg-[#ff174f] px-4 py-3 text-white">
               <div>
-                <p className="text-[10px] font-bold text-red-100">PRIZE POOL</p>
-                <p className="text-2xl font-black">₹1,225</p>
-              </div>
-
-              <div className="h-10 w-px bg-white/20" />
-
-              <div>
-                <p className="text-[10px] font-bold text-red-100">ENTRY</p>
-                <p className="text-2xl font-black">₹34</p>
-              </div>
-
-              <div className="h-10 w-px bg-white/20" />
-
-              <div>
-                <p className="text-[10px] font-bold text-red-100">PLAYERS</p>
-                <p className="text-2xl font-black">48</p>
-              </div>
-            </div>
-          </div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-white/70"></p>
+                <div className="mb-1.5 flex w-full items-center gap-2">
+          <span className="text-lg">📜</span>
+          <h2 className="text-sm font-black text-gray-900">Tournament Rules</h2>
         </div>
-      </section>
-
-      {/* QUICK ACTIONS */}
-      <section className="px-3 pt-4">
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => setPopup("how")}
-            className="rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm active:scale-[0.98]"
-          >
-            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-xl">
-              🎮
+              </div>
+              
             </div>
-            <p className="text-sm font-black">How To Play</p>
-            <p className="mt-1 text-[10px] font-medium text-gray-400">
-              Learn how to join & play
-            </p>
-          </button>
 
-          <button
-            onClick={() => setPopup("rules")}
-            className="rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm active:scale-[0.98]"
-          >
-            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-xl">
-              📜
+            <div className="space-y-2 p-3">
+              {tournamentRules.slice(0, 5).map((rule, index) => (
+                <RulePreview
+                  key={`${rule}-${index}`}
+                  icon={index === 0 ? "📖" : "🚫"}
+                  text={rule}
+                />
+              ))}
+              <button
+                type="button"
+                onClick={() => setRulesOpen(true)}
+                className="shrink-0 cursor-pointer rounded-lg bg-emerald-500 px-2.5 py-1.5 text-[9px] font-black text-white shadow-sm"
+              >
+                VIEW ALL RULES
+              </button>
             </div>
-            <p className="text-sm font-black">Match Rules</p>
-            <p className="mt-1 text-[10px] font-medium text-gray-400">
-              Check all tournament rules
-            </p>
-          </button>
+          </div>
+
+          {/* Tournament title */}
+          <div className="p-4 pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-[#ff174f]/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-[#ff174f]">
+                    Free Fire
+                  </span>
+                  <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-gray-500">
+                    {tournament.mode || "Solo"}
+                  </span>
+                </div>
+
+                <h2 className="text-xl font-black leading-tight text-gray-900">
+                  {tournament.title}
+                </h2>
+
+                <p className="mt-1 text-[11px] font-semibold text-gray-400">
+                  Play smart. Survive longer. Win bigger.
+                </p>
+              </div>
+
+              <div className="shrink-0 rounded-2xl bg-[#ff174f]/10 px-3 py-2 text-center">
+                <p className="text-[8px] font-black uppercase tracking-wider text-gray-400">
+                  Status
+                </p>
+                <p className="mt-0.5 text-[10px] font-black text-[#ff174f]">
+                  ● {statusLabel}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Prize / Entry / Players */}
+          <div className="px-4 pb-4">
+            <div className="grid grid-cols-3 overflow-hidden rounded-2xl border border-gray-100 bg-gray-50">
+              <div className="px-3 py-3.5 text-center">
+                <div className="mx-auto mb-1.5 flex h-8 w-8 items-center justify-center rounded-xl bg-green-50 text-sm shadow-sm">
+                  🏆
+                </div>
+                <p className="text-[8px] font-black uppercase tracking-wide text-green-600">
+                  Prize Pool
+                </p>
+                <p className="mt-0.5 text-base font-black text-green-600">
+                  ₹{Number(tournament.prize_pool || 0).toLocaleString("en-IN")}
+                </p>
+              </div>
+
+              <div className="border-x border-gray-200 px-3 py-3.5 text-center">
+                <div className="mx-auto mb-1.5 flex h-8 w-8 items-center justify-center rounded-xl bg-green-50 text-sm shadow-sm">
+                  💰
+                </div>
+                <p className="text-[8px] font-black uppercase tracking-wide text-green-600">
+                  Entry
+                </p>
+                <p className="mt-0.5 text-base font-black text-green-600">
+                  ₹{entryFee.toLocaleString("en-IN")}
+                </p>
+              </div>
+
+              <div className="px-3 py-3.5 text-center">
+                <div className="mx-auto mb-1.5 flex h-8 w-8 items-center justify-center rounded-xl bg-green-50 text-sm shadow-sm">
+                  👥
+                </div>
+                <p className="text-[8px] font-black uppercase tracking-wide text-green-600">
+                  Players
+                </p>
+                <p className="mt-0.5 text-base font-black text-green-600">
+                  {maxPlayers}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -193,63 +997,41 @@ export default function TournamentPage() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <InfoCard icon="💰" label="Entry Fee" value="₹34" />
-          <InfoCard icon="🏆" label="Prize Pool" value="₹1,225" />
-          <InfoCard icon="🎯" label="Kill Point" value="₹0 / Kill" />
-          <InfoCard icon="🎁" label="Bonus Usable" value="30%" />
-          <InfoCard icon="📅" label="Start Date" value="30 Jun 2026" />
-          <InfoCard icon="⏰" label="Start Time" value="05:30 PM" />
-          <InfoCard icon="👥" label="Participants" value="48 Players" />
-          <InfoCard icon="🗺️" label="Map" value="Bermuda Classic" />
+          <InfoCard icon="💰" label="Entry Fee" value={`₹${entryFee.toLocaleString("en-IN")}`} green />
+          <InfoCard icon="🏆" label="Prize Pool" value={`₹${Number(tournament.prize_pool || 0).toLocaleString("en-IN")}`} green />
+          <InfoCard icon="🎯" label="Kill Point" value={`₹${Number(tournament.kill_reward || 0).toLocaleString("en-IN")} / Kill`} green />
+          <InfoCard icon="🎁" label="Bonus Usable" value={`${bonusUsablePercent}%`} />
+          <InfoCard icon="📅" label="Start Date" value={formattedDate} />
+          <InfoCard icon="⏰" label="Start Time" value={formattedTime} />
+          <InfoCard icon="👥" label="Participants" value={`${joinedPlayers} Players`} />
+          <InfoCard icon="🗺️" label="Map" value={tournament.map || "Bermuda Classic"} />
         </div>
       </section>
 
       {/* PLAYERS PROGRESS */}
       <section className="px-3 pt-5">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-black">Tournament Slots</p>
-              <p className="mt-1 text-[10px] font-medium text-gray-400">
-                12 players joined out of 48
+              <p className="mt-0 text-[8px] font-medium text-gray-400">
+                {joinedPlayers} players joined out of {maxPlayers}
               </p>
             </div>
 
-            <p className="text-sm font-black text-red-600">25%</p>
+            <p className="text-sm font-black text-red-600">{Math.round(slotPercentage)}%</p>
           </div>
 
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
-            <div className="h-full w-[25%] rounded-full bg-gradient-to-r from-red-600 to-orange-500" />
+            <div
+              className="h-full rounded-full bg-[#ff174f] transition-all duration-300"
+              style={{ width: `${slotPercentage}%` }}
+            />
           </div>
 
           <div className="mt-2 flex justify-between text-[9px] font-bold text-gray-400">
-            <span>12 Joined</span>
-            <span>36 Slots Left</span>
-          </div>
-        </div>
-      </section>
-
-      {/* RULE HIGHLIGHT */}
-      <section className="px-3 pt-5">
-        <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-xl">
-              ⚠️
-            </div>
-
-            <div>
-              <p className="text-sm font-black text-red-700">Important Rules</p>
-              <p className="text-[10px] font-medium text-red-500">
-                Read before joining the match
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-2 text-xs font-bold text-gray-700">
-            <p>• Vehicle is not allowed</p>
-            <p>• Air Drop is not allowed</p>
-            <p>• Double Vector is not allowed</p>
-            <p>• Teaming / cheating is strictly prohibited</p>
+            <span>{joinedPlayers} Joined</span>
+            <span>{Math.max(0, maxPlayers - joinedPlayers)} Slots Left</span>
           </div>
         </div>
       </section>
@@ -259,9 +1041,29 @@ export default function TournamentPage() {
         <h3 className="mb-3 text-base font-black">Prize Distribution</h3>
 
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <PrizeRow rank="1st" prize="₹600" icon="🥇" />
-          <PrizeRow rank="2nd" prize="₹350" icon="🥈" />
-          <PrizeRow rank="3rd" prize="₹275" icon="🥉" />
+          {(prizes.length > 0
+            ? prizes
+            : [
+                { id: "fallback-1", rank: 1, label: "1st", amount: 0 },
+                { id: "fallback-2", rank: 2, label: "2nd", amount: 0 },
+                { id: "fallback-3", rank: 3, label: "3rd", amount: 0 },
+              ]
+          ).map((prize) => (
+            <PrizeRow
+              key={prize.id}
+              rank={prize.label || `${prize.rank}th`}
+              prize={`₹${Number(prize.amount || 0).toLocaleString("en-IN")}`}
+              icon={
+                prize.rank === 1
+                  ? "🥇"
+                  : prize.rank === 2
+                  ? "🥈"
+                  : prize.rank === 3
+                  ? "🥉"
+                  : "🏅"
+              }
+            />
+          ))}
         </div>
       </section>
 
@@ -274,7 +1076,16 @@ export default function TournamentPage() {
             MY MATCHES
           </button>
 
-          <button className="rounded-xl border border-gray-200 bg-white py-3 text-[10px] font-black text-gray-700 shadow-sm">
+          <button
+            type="button"
+            onClick={() => {
+              setParticipantSearch("");
+              setParticipantsOpen(true);
+              loadCurrentUserForCancel();
+              loadParticipants();
+            }}
+            className="rounded-xl border border-emerald-100 bg-white py-3 text-[10px] font-black text-gray-700 shadow-sm transition active:scale-95"
+          >
             👥
             <br />
             PARTICIPANTS
@@ -282,42 +1093,342 @@ export default function TournamentPage() {
 
           <button
             onClick={openJoinPopup}
-            className="rounded-xl bg-gradient-to-r from-red-600 to-red-500 py-3 text-[10px] font-black text-white shadow-lg shadow-red-200"
-          >
-            🔥
+            className="bg-red-500 hover:bg-red-600 disabled:bg-emerald-500 disabled:hover:bg-emerald-500 disabled:cursor-not-allowed rounded-xl py-3 text-[10px] font-black text-white shadow-lg"
+           disabled={joined}>
+            {joined ? "✓" : "🔥"}
             <br />
-            JOIN NOW
+            {joined ? "ALREADY JOINED" : "JOIN NOW"}
           </button>
         </div>
       </div>
 
-      {/* POPUP */}
-      {popup && (
-        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 px-2 pb-2 backdrop-blur-sm sm:items-center sm:px-3 sm:pb-3">
-          <div className="max-h-[92vh] w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl sm:max-h-[85vh]">
+      {/* CANCEL MODALS */}
+      {cancelModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm overflow-hidden rounded-3xl bg-white shadow-2xl">
+            {cancelModal === "notice" && (
+              <>
+                <div className="px-5 pb-2 pt-6 text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-2xl">⚠️</div>
+                  <h3 className="mt-3 text-base font-black text-gray-900">Cancellation Notice</h3>
+                  <p className="mt-2 text-sm font-bold leading-5 text-red-600">
+                    If you cancel this tournament entry, <b>you will lose 30% of your joining fee</b>.
+                  </p>
+                  <p className="mt-2 text-sm font-bold leading-5 text-red-600">
+                    You can cancel the tournament 2 hours before the match time.
+                  </p>
+                </div>
+                <div className="flex gap-2 border-t border-gray-100 p-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingCancelEntryId(null);
+                      setCancelModal(null);
+                    }}
+                    className="flex-1 rounded-xl border border-red-200 bg-red-50 py-3 text-[10px] font-black text-red-600"
+                  >
+                    NO, KEEP JOINED
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmCancelTournament}
+                    className="flex-1 rounded-xl bg-green-600 py-3 text-[10px] font-black text-white shadow-lg shadow-green-200"
+                  >
+                    {cancelling ? "CANCELLING..." : "YES, CANCEL"}
+                  </button>
+                </div>
+              </>
+            )}
 
-            <div className="flex items-center justify-between bg-gradient-to-r from-red-700 to-red-500 px-5 py-4 text-white">
-              <h3 className="text-base font-black">
-                {popup === "how"
-                  ? "How To Play"
-                  : popup === "rules"
-                  ? "Match Rules"
-                  : "Join Tournament"}
-              </h3>
+            {(cancelModal === "success" || cancelModal === "error") && (
+              <>
+                <div className="px-5 pb-2 pt-6 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 text-3xl text-white shadow-lg shadow-emerald-200 ring-4 ring-emerald-50">
+                    {cancelModal === "success" ? "✓" : "⚠️"}
+                  </div>
+                  <h3 className="mt-3 text-base font-black text-red-600">
+                    {cancelModal === "success" ? "Cancelled Successfully" : "Unable to Cancel"}
+                  </h3>
+                  <p className="mt-2 text-sm font-bold leading-5 text-red-600">
+                    {cancelModal === "success"
+                      ? "Tournament entry cancelled successfully. and your 70% fees refund ho gyi hai"
+                      : cancelModalMessage}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
+      {/* INSUFFICIENT BALANCE POPUP */}
+      {insufficientBalanceOpen && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="px-5 pb-3 pt-7 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-3xl shadow-sm ring-1 ring-red-100">
+                ⚠️
+              </div>
+              <h3 className="mt-4 text-lg font-black text-gray-900">Insufficient Balance</h3>
+              <p className="mt-2 text-sm font-semibold leading-5 text-gray-500">
+                Your wallet balance is not enough to join this tournament.
+              </p>
+              <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-red-600">Entry Fee</span>
+                  <span className="text-red-600">₹{entryFee}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-xs font-bold">
+                  <span className="text-red-600">Usable Balance</span>
+                  <span className="text-red-600">₹{Number(tournamentUsableBalance || 0).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 border-t border-gray-100 p-4">
               <button
-                onClick={() => setPopup(null)}
+                type="button"
+                onClick={() => setInsufficientBalanceOpen(false)}
+                className="flex-1 rounded-xl border border-red-200 bg-red-50 py-3 text-[10px] font-black text-red-600"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setInsufficientBalanceOpen(false);
+                  setSlideValue(0);
+                  router.push("/wallet");
+                }}
+                className="flex-1 rounded-xl bg-green-600 py-3 text-[10px] font-black text-white shadow-lg shadow-green-200"
+              >
+                ADD MONEY
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PARTICIPANTS MODAL */}
+      {participantsOpen && (
+        <div className="fixed inset-0 z-[115] flex items-end justify-center bg-black/60 px-2 pb-2 backdrop-blur-sm sm:items-center sm:px-3 sm:pb-3">
+          <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="bg-gradient-to-r from-[#ff174f] to-[#e91447] px-4 py-2 text-white">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-black leading-tight">Participants</h3>
+                  <p className="mt-0 text-[9px] font-semibold leading-3 text-white/80">
+                    {participants.length} players joined this tournament
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setParticipantsOpen(false)}
+                  className="flex h-7 min-w-7 items-center justify-center rounded-full bg-white/15 px-2 text-[8px] font-black"
+                >
+                  CLOSE
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-0 max-h-[58vh] flex-1 space-y-1.5 overflow-y-auto overscroll-contain bg-[#f8faf9] p-2.5 [scrollbar-width:thin]">
+              {participantsLoading ? (
+                <div className="rounded-2xl border border-gray-100 bg-white p-8 text-center shadow-sm">
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-[#ff174f]" />
+                  <p className="mt-3 text-xs font-bold text-gray-500">Loading players...</p>
+                </div>
+              ) : participantsError ? (
+                <div className="rounded-2xl border border-red-100 bg-red-50 p-4 text-center text-xs font-bold text-red-600">
+                  {participantsError}
+                </div>
+              ) : (
+                (() => {
+                  const query = participantSearch.trim().toLowerCase();
+                  const filtered = participants.filter((player) => {
+                    const name = String(player.users?.full_name || "").trim().toLowerCase();
+                    const gameName = String(player.game_name || "").trim().toLowerCase();
+                    const playerUid = String(player.free_fire_uid || "").trim().toLowerCase();
+
+                    if (!query) return true;
+
+                    return (
+                      name.includes(query) ||
+                      gameName.includes(query) ||
+                      playerUid.includes(query)
+                    );
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="rounded-2xl border border-gray-100 bg-white p-8 text-center shadow-sm">
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-2xl">
+                          👥
+                        </div>
+                        <p className="mt-3 text-sm font-black text-gray-800">No players found</p>
+                        <p className="mt-1 text-[10px] font-semibold text-gray-400">Try another name or UID.</p>
+                      </div>
+                    );
+                  }
+
+                  return filtered.map((player, index) => {
+                    const name = player.users?.full_name?.trim() || "Unknown Player";
+                    const gameNameValue = player.game_name?.trim() || "—";
+                    const uidValue = player.free_fire_uid || "—";
+                    const playerLevel = player.users?.level ?? "—";
+                    const bio = player.users?.bio?.trim() || "GamerzAdda tournament player";
+
+                    return (
+                      <div
+                        key={player.id}
+                        className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+                      >
+                        <div className="flex items-center gap-1 p-2">
+                          <div className="relative shrink-0">
+                            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border-2 border-red-100 bg-gradient-to-br from-red-50 to-emerald-50 shadow-sm">
+                              {player.users?.avatar_url ? (
+                                <img
+                                  src={player.users.avatar_url}
+                                  alt={name}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <span className="text-lg">👤</span>
+                              )}
+                            </div>
+                            <span className="absolute -bottom-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-white bg-emerald-500 px-1 text-[7px] font-black text-white">
+                              #{String(index + 1).padStart(2, "0")}
+                            </span>
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-0.5">
+                              <div className="min-w-0">
+                                <h4 className="truncate text-[14px] font-black text-gray-900">{name}</h4>
+                                <p className="mt-0.5 truncate text-[11px] font-medium text-gray-400">{gameNameValue}</p>
+                              </div>
+                              <div className="flex shrink-0 flex-col items-end gap-0.5">
+                                {isOwnParticipant(player) && !player.cancelled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCancelTournament(player.id, player.user_id)}
+                                    disabled={!canCancelTournament || cancelling}
+                                    className={`rounded-lg border px-2 py-1 text-[7px] font-black transition ${
+                                      canCancelTournament && !cancelling
+                                        ? "border-red-200 bg-red-50 text-red-600 active:scale-[0.97]"
+                                        : "cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400"
+                                    }`}
+                                  >
+                                    {cancelling
+                                      ? "CANCELLING..."
+                                      : canCancelTournament
+                                        ? "CANCEL"
+                                        : "LOCKED"}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0 text-[11px] font-medium text-gray-400">
+                              <span>UID: <b className="text-gray-600">{uidValue}</b></span>
+                              <span className="rounded-full bg-red-50 px-1.5 py-0 text-red-500">
+                                ⭐ Level {playerLevel}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-gray-100 bg-emerald-50/60 px-2 py-1.5">
+                                                    <p className="mt-0 line-clamp-1 text-[9px] font-semibold leading-3 text-gray-600">{bio}</p>
+                        </div>
+
+                      </div>
+                    );
+                  });
+                })()
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ALL RULES MODAL */}
+      {rulesOpen && (
+        <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/60 px-2 pb-2 backdrop-blur-sm sm:items-center sm:px-3 sm:pb-3">
+          <div className="max-h-[90vh] max-h-[92vh] w-full max-w-md overflow-y-auto overflow-x-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-[#ff174f] px-5 py-4 text-white">
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-widest text-white/70">GamerzAdda</p>
+                <h3 className="text-lg font-black">All Tournament Rules</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRulesOpen(false)}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-lg"
               >
                 ×
               </button>
             </div>
 
-            <div className="max-h-[70vh] overflow-y-auto p-4 sm:max-h-[65vh] sm:p-5">
+            <div className="max-h-[68vh] space-y-2.5 overflow-y-auto p-4">
+              {tournamentRules.map((rule, index) => (
+                <div
+                  key={`${rule}-${index}`}
+                  className="flex gap-3 rounded-2xl border border-gray-100 bg-gray-50 p-3"
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-black text-emerald-600">
+                    •
+                  </div>
+                  <p className="pt-1 text-xs font-bold leading-5 text-gray-700">
+                    {rule}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-gray-100 p-2.5">
+              <button
+                type="button"
+                onClick={() => setRulesOpen(false)}
+                className="w-full rounded-xl bg-[#ff174f] py-3 text-sm font-black text-white shadow-lg shadow-red-200"
+              >
+                GOT IT
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP */}
+      {popup && (
+        <div
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 px-2 pb-2 backdrop-blur-sm sm:items-center sm:px-3 sm:pb-3"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) {
+              closePopup();
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+
+            <div className="flex items-center bg-[#ff174f] px-4 py-2 text-white">
+              <h3 className="text-sm font-black">
+                {popup === "how"
+                  ? "How To Play"
+                  : popup === "rules"
+                  ? "Match Rules"
+                  : "Join Tournament"}
+              </h3>
+            </div>
+
+            <div className="p-3 sm:p-3.5">
 
               {/* HOW TO PLAY */}
               {popup === "how" && (
-                <div className="space-y-4">
+                <div className="space-y-1.5">
                   <Step number="1" text="Join the tournament using the Join Now button." />
                   <Step number="2" text="Wait for the room details to be provided." />
                   <Step number="3" text="Enter the room before the match starts." />
@@ -335,46 +1446,74 @@ export default function TournamentPage() {
                   <Rule text="Double Vector is not allowed." />
                   <Rule text="Teaming with other players is prohibited." />
                   <Rule text="Cheating or unfair play may result in disqualification." />
-                  <Rule text="30% bonus is usable for this match." />
+                  <Rule text={`${bonusUsablePercent}% bonus is usable for this match.`} />
                 </div>
               )}
 
               {/* JOIN TOURNAMENT */}
               {popup === "join" && (
-                <div className="space-y-4">
+                <div className="space-y-2">
 
                   {joined ? (
-                    <div className="py-4 text-center">
-                      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-3xl">
-                        ✓
+                    <div className="py-2 text-center">
+                      <div className="relative mx-auto mb-4 flex h-20 w-20 items-center justify-center">
+                        <div className="absolute inset-0 rounded-full bg-emerald-400/20 blur-xl" />
+                        <div className="relative flex h-16 w-16 items-center justify-center rounded-full border-4 border-white bg-gradient-to-br from-emerald-400 to-green-600 text-white shadow-[0_12px_35px_rgba(16,185,129,0.35)] ring-1 ring-emerald-200">
+                          <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M5 12.5l4.2 4.2L19 7" />
+                          </svg>
+                        </div>
                       </div>
 
-                      <h4 className="mt-4 text-xl font-black text-gray-900">
+                      <h4 className="text-xl font-black tracking-tight text-gray-900">
                         Tournament Joined! 🎉
                       </h4>
-
-                      <p className="mt-1 text-xs font-medium text-gray-500">
+                      <p className="mt-1 text-xs font-semibold text-gray-500">
                         Your entry has been confirmed successfully.
                       </p>
 
-                      <div className="mt-5 space-y-2 rounded-2xl bg-gray-50 p-4 text-left">
-                        <WalletRow label="In-Game Name" value={gameName} strong />
-                        <WalletRow label="UID" value={uid} />
-                        <WalletRow label="Level" value={level} />
-                        <WalletRow label="Entry Fee" value={`- ₹${entryFee}`} />
-                        <div className="my-2 border-t border-gray-200" />
-                        <WalletRow label="Balance After Join" value={`₹${balanceAfterJoin}`} strong />
+                      <div className="mt-5 overflow-hidden rounded-2xl border border-gray-100 bg-white text-left shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
+                        <div className="flex items-center justify-between border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-green-50 px-4 py-3">
+                          <div>
+                            <p className="text-[9px] font-black uppercase tracking-[0.14em] text-emerald-600">Entry Details</p>
+                            <p className="mt-0.5 text-xs font-bold text-gray-700">Successfully registered</p>
+                          </div>
+                          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100">
+                            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M12 3l2.4 2.1 3.2-.1.9 3 2.1 2.4-2.1 2.4-.9 3-3.2-.1L12 21l-2.4-2.1-3.2.1-.9-3-2.1-2.4 2.1-2.4.9-3 3.2.1L12 3z" />
+                              <path d="M8.5 12.2l2.2 2.2 4.8-5" />
+                            </svg>
+                          </span>
+                        </div>
+
+                        <div className="space-y-3 p-4">
+                          <WalletRow label="In-Game Name" value={gameName} strong />
+                          <WalletRow label="UID" value={uid} />
+                          <WalletRow label="Level" value={level} />
+                          <WalletRow label="Entry Fee" value={`- ₹${entryFee}`} red />
+                          <div className="border-t border-dashed border-gray-200" />
+                          <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2.5">
+                            <WalletRow label="Balance After Join" value={`₹${balanceAfterJoin}`} strong green />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex gap-2.5 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-yellow-50 p-3 text-left shadow-sm">
+                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-sm">⚠️</span>
+                        <p className="text-[10px] font-bold leading-4 text-amber-800">
+                          Important: Please read all tournament rules carefully before joining any GamerzAdda tournament.
+                        </p>
                       </div>
                     </div>
                   ) : (
                     <>
                       {/* IN-GAME NAME */}
                       <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-black text-gray-700">
+                        <div className="mb-0.5 flex items-center justify-between">
+                          <p className="text-xs font-medium text-gray-700">
                             🎮 IN-GAME NAME
                           </p>
-                          <span className="text-[10px] font-bold text-gray-400">
+                          <span className="text-xs font-medium text-gray-400">
                             {gameName.length}/20
                           </span>
                         </div>
@@ -386,21 +1525,21 @@ export default function TournamentPage() {
                           autoComplete="off"
                           placeholder="Enter your in-game name"
                           onChange={(e) => handleGameNameChange(e.target.value)}
-                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold uppercase outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold uppercase outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                         />
 
-                        <p className="mt-1 text-[10px] font-medium text-gray-400">
+                        <p className="mt-0 text-[8px] font-medium text-gray-400">
                           Maximum 20 characters • Automatically uppercase
                         </p>
                       </div>
 
                       {/* UID */}
                       <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-black text-gray-700">
+                        <div className="mb-0.5 flex items-center justify-between">
+                          <p className="text-xs font-medium text-gray-700">
                             🆔 UID
                           </p>
-                          <span className="text-[10px] font-bold text-gray-400">
+                          <span className="text-xs font-medium text-gray-400">
                             {uid.length}/15
                           </span>
                         </div>
@@ -413,21 +1552,21 @@ export default function TournamentPage() {
                           autoComplete="off"
                           placeholder="Enter Free Fire UID"
                           onChange={(e) => handleUidChange(e.target.value)}
-                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                         />
 
-                        <p className="mt-1 text-[10px] font-medium text-gray-400">
+                        <p className="mt-0 text-[8px] font-medium text-gray-400">
                           Numbers only • Maximum 15 digits
                         </p>
                       </div>
 
                       {/* LEVEL */}
                       <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-black text-gray-700">
+                        <div className="mb-0.5 flex items-center justify-between">
+                          <p className="text-xs font-medium text-gray-700">
                             ⭐ LEVEL
                           </p>
-                          <span className="text-[10px] font-bold text-gray-400">
+                          <span className="text-xs font-medium text-gray-400">
                             1–100
                           </span>
                         </div>
@@ -440,86 +1579,105 @@ export default function TournamentPage() {
                           value={level}
                           placeholder="Enter your level (1-100)"
                           onChange={(e) => handleLevelChange(e.target.value)}
-                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                         />
 
-                        <p className="mt-1 text-[10px] font-medium text-gray-400">
+                        <p className="mt-0 text-[8px] font-medium text-gray-400">
                           Level must be between 1 and 100
                         </p>
                       </div>
 
-                      {/* ENTRY FEE SUMMARY */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
-                          <p className="text-[9px] font-black uppercase text-red-400">
-                            Entry Fee
-                          </p>
-                          <p className="mt-1 text-xl font-black text-red-600">
-                            ₹{entryFee}
+                      {tournamentUsableBalance < entryFee && !walletLoading && (
+                        <div className="mb-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-center">
+                          <p className="text-[11px] font-black text-red-600">
+                            ⚠️ Insufficient wallet balance to join this tournament
                           </p>
                         </div>
+                      )}
 
-                        <div className="rounded-2xl border border-green-100 bg-green-50 p-4">
-                          <p className="text-[9px] font-black uppercase text-green-500">
-                            After Join
-                          </p>
-                          <p className="mt-1 text-xl font-black text-green-600">
-                            ₹{balanceAfterJoin}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* COLLAPSED WALLET BREAKDOWN */}
-                      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+                      {/* WALLET BREAKDOWN */}
+                      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gradient-to-br from-gray-50 via-white to-gray-50 shadow-sm">
                         <button
                           type="button"
                           onClick={() => setWalletOpen((open) => !open)}
                           aria-expanded={walletOpen}
-                          className="flex w-full items-center justify-between px-4 py-4 text-left"
+                          className="group flex w-full items-center justify-between px-3 py-2 text-left transition hover:bg-white/70 active:scale-[0.995]"
                         >
-                          <div>
-                            <p className="text-sm font-black text-gray-900">
-                              💰 Wallet Breakdown
-                            </p>
-                            <p className="mt-0.5 text-[10px] font-medium text-gray-400">
-                              {walletOpen ? "Hide balance details" : "Tap to view balance details"}
-                            </p>
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-sm shadow-sm">
+                              💰
+                            </span>
+                            <div>
+                              <p className="text-xs font-medium text-gray-900">Wallet Breakdown</p>
+                              <p className="text-xs font-medium text-gray-400">
+                                {walletOpen ? "Hide balance details" : "Tap to view balance details"}
+                              </p>
+                              <div className="mt-1 space-y-0 text-xs font-medium">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-red-600">Tournament Entry Fee</span>
+                                  <span className="text-red-600">- ₹{entryFee.toLocaleString("en-IN")}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-emerald-600">Balance After Join</span>
+                                  <span className="text-emerald-600">₹{balanceAfterJoin.toLocaleString("en-IN")}</span>
+                                </div>
+                              </div>
+                            </div>
                           </div>
 
-                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-sm font-black text-gray-500 shadow-sm">
-                            {walletOpen ? "⌃" : "⌄"}
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-yellow-200 bg-yellow-50 text-yellow-700 shadow-sm transition-transform duration-200">
+                            <svg
+                              viewBox="0 0 24 24"
+                              className={`h-4 w-4 transition-transform duration-200 ${walletOpen ? "rotate-180" : ""}`}
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M6 9l6 6 6-6" />
+                            </svg>
                           </span>
                         </button>
 
                         {walletOpen && (
-                          <div className="border-t border-gray-200 px-4 pb-4 pt-2">
-                            <div className="space-y-2.5 text-xs">
-                              <WalletRow label="Available Balance" value="₹500" strong />
-                              <WalletRow label="Winning Balance" value="₹200" />
-                              <WalletRow label="Deposit Balance" value="₹250" />
-                              <WalletRow label="Bonus Balance" value="₹50" />
-                            </div>
+                          <div className="border-t border-gray-100 px-3 py-2">
+                            <div className="space-y-0 text-xs leading-none">
+                              <p className="rounded-md bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800">Current Wallet Balance</p>
 
-                            <div className="my-3 border-t border-gray-200" />
+                              <div className="flex items-center justify-between py-0 text-xs font-medium">
+                                <span className="text-gray-600">Bonus Balance</span>
+                                <span className="text-emerald-600">₹{bonusBalance.toLocaleString("en-IN")}</span>
+                              </div>
+                              <div className="flex items-center justify-between py-0 text-xs font-medium">
+                                <span className="text-gray-600">Deposit Balance</span>
+                                <span className="text-emerald-600">₹{depositBalance.toLocaleString("en-IN")}</span>
+                              </div>
+                              <div className="flex items-center justify-between py-0 text-xs font-medium">
+                                <span className="text-gray-600">Winning Balance</span>
+                                <span className="text-emerald-600">₹{winningBalance.toLocaleString("en-IN")}</span>
+                              </div>
 
-                            <WalletRow
-                              label="Tournament Entry Fee"
-                              value={`- ₹${entryFee}`}
-                            />
+                              <div className="my-1 border-t border-gray-200" />
 
-                            <div className="mt-3 rounded-xl bg-white p-3">
-                              <WalletRow
-                                label="Balance After Join"
-                                value={`₹${balanceAfterJoin}`}
-                                strong
-                              />
+                              <p className="rounded-md bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800">Tournament Entry Deduction</p>
+
+                              <div className="flex items-center justify-between py-0 text-xs font-medium">
+                                <span className="text-gray-600">Bonus Used</span>
+                                <span className="text-red-600">- ₹{bonusCut.toLocaleString("en-IN")}</span>
+                              </div>
+                              <div className="flex items-center justify-between py-0 text-xs font-medium">
+                                <span className="text-gray-600">Deposit Used</span>
+                                <span className="text-red-600">- ₹{depositCut.toLocaleString("en-IN")}</span>
+                              </div>
+                              <div className="flex items-center justify-between py-0 text-xs font-medium">
+                                <span className="text-gray-600">Winning Used</span>
+                                <span className="text-red-600">- ₹{winningCut.toLocaleString("en-IN")}</span>
+                              </div>
                             </div>
                           </div>
                         )}
-                      </div>
-
-                      <div className="rounded-xl bg-red-50 p-3 text-center text-[10px] font-bold text-red-600">
-                        ₹{entryFee} will be deducted from your wallet after confirmation.
                       </div>
 
                       {joinError && (
@@ -538,7 +1696,7 @@ export default function TournamentPage() {
 
             </div>
 
-            <div className="border-t border-gray-100 p-4">
+            <div className="border-t border-gray-100 p-2.5">
 
               {popup === "join" ? (
                 joined ? (
@@ -552,21 +1710,21 @@ export default function TournamentPage() {
                   <div className="w-full">
                     <div
                       ref={sliderRef}
-                      className="relative h-[64px] w-full select-none overflow-hidden rounded-2xl border border-red-200 bg-gradient-to-r from-red-50 via-white to-red-50 shadow-inner touch-none"
+                      className={`relative h-[62px] w-full select-none overflow-hidden rounded-2xl border border-red-200/80 bg-gradient-to-r from-red-50 via-white to-red-50 shadow-[0_10px_28px_rgba(255,23,79,0.14)] touch-none ${tournamentUsableBalance < entryFee ? "cursor-not-allowed opacity-75" : ""}`}
                       aria-label="Slide to join tournament"
                     >
                       <div
-                        className="absolute inset-y-0 left-0 rounded-2xl bg-gradient-to-r from-red-600 to-orange-500 transition-[width] duration-75"
+                        className="absolute inset-y-0 left-0 rounded-2xl bg-gradient-to-r from-[#ff174f] via-[#ff174f] to-[#ff315f] shadow-[0_0_22px_rgba(255,23,79,0.28)]"
                         style={{ width: `${slideValue}%` }}
                       />
 
                       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                         <span
-                          className={`text-[11px] font-black tracking-widest transition-colors ${
+                          className={`text-[11px] font-black tracking-[0.18em] transition-colors duration-150 ${
                             slideValue >= 55 ? "text-white" : "text-red-500"
                           }`}
                         >
-                          {slideValue >= 100 ? "JOINING..." : "SLIDE TO JOIN"}
+                          {joining || slideValue >= 100 ? "JOINING..." : "SLIDE TO JOIN"}
                         </span>
                       </div>
 
@@ -574,12 +1732,19 @@ export default function TournamentPage() {
                         type="button"
                         aria-label="Slide to confirm and join"
                         onPointerDown={(e) => {
-                          if (joined) return;
+                          if (joined || joining) return;
+                          if (tournamentUsableBalance < entryFee) {
+                            e.preventDefault();
+                            setSlideValue(0);
+                            setInsufficientBalanceOpen(true);
+                            return;
+                          }
                           e.preventDefault();
                           e.currentTarget.setPointerCapture(e.pointerId);
                         }}
                         onPointerMove={(e) => {
-                          if (!e.currentTarget.hasPointerCapture(e.pointerId) || joined) return;
+                          if (tournamentUsableBalance < entryFee) return;
+                          if (!e.currentTarget.hasPointerCapture(e.pointerId) || joined || joining) return;
                           const rect = sliderRef.current?.getBoundingClientRect();
                           if (!rect) return;
 
@@ -590,7 +1755,12 @@ export default function TournamentPage() {
                           setSlideValue(next);
                         }}
                         onPointerUp={(e) => {
-                          if (!e.currentTarget.hasPointerCapture(e.pointerId) || joined) return;
+                          if (tournamentUsableBalance < entryFee) {
+                            setSlideValue(0);
+                            setSlideValue(0);
+                            return;
+                          }
+                          if (!e.currentTarget.hasPointerCapture(e.pointerId) || joined || joining || tournamentUsableBalance < entryFee) return;
                           e.currentTarget.releasePointerCapture(e.pointerId);
 
                           if (slideValue >= 90) {
@@ -605,15 +1775,17 @@ export default function TournamentPage() {
                           }
                           setSlideValue(0);
                         }}
-                        className="absolute top-1/2 z-10 flex h-[54px] w-[54px] -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-xl bg-white text-2xl shadow-lg ring-1 ring-red-100 transition-[left] duration-75 active:scale-95"
+                        className="absolute top-1/2 z-10 flex h-[50px] w-[50px] -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-2xl border border-white bg-white text-2xl font-black text-[#ff174f] shadow-[0_7px_22px_rgba(0,0,0,0.16)] ring-1 ring-red-100/80 transition-[left] duration-75 ease-out active:scale-[0.94]"
                         style={{ left: `calc(${Math.min(slideValue, 100)}% * 0.9 + 5%)` }}
                       >
                         {slideValue >= 90 ? "✓" : "→"}
                       </button>
                     </div>
 
-                    <p className="mt-2 text-center text-[9px] font-bold text-gray-400">
-                      Drag the arrow all the way to the right to confirm • ₹{entryFee} will be deducted
+                    <p className={`mt-1 text-center text-[8px] font-bold ${tournamentUsableBalance < entryFee ? "text-red-500" : "text-gray-400"}`}>
+                      {tournamentUsableBalance < entryFee
+                        ? "Insufficient wallet balance to join this tournament"
+                        : `Drag the arrow all the way to the right to confirm • ₹${entryFee} will be deducted`}
                     </p>
                   </div>
                 )
@@ -641,24 +1813,26 @@ function InfoCard({
   icon,
   label,
   value,
+  green,
 }: {
   icon: string;
   label: string;
   value: string;
+  green?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className={`rounded-2xl border p-4 shadow-sm ${green ? "border-green-100 bg-green-50/40" : "border-gray-200 bg-white"}`}>
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-50 text-lg">
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg ${green ? "bg-green-100" : "bg-gray-50"}`}>
           {icon}
         </div>
 
         <div className="min-w-0">
-          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">
+          <p className={`text-[9px] font-bold uppercase tracking-wide ${green ? "text-green-600" : "text-gray-400"}`}>
             {label}
           </p>
 
-          <p className="mt-1 truncate text-sm font-black">
+          <p className={`mt-1 truncate text-sm font-black ${green ? "text-green-600" : "text-gray-900"}`}>
             {value}
           </p>
         </div>
@@ -722,6 +1896,17 @@ function Step({
 }
 
 
+/* RULE PREVIEW */
+function RulePreview({ icon, text }: { icon: string; text: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-red-50 p-3">
+      <span className="text-lg">{icon}</span>
+      <p className="text-xs font-bold text-emerald-600">{text}</p>
+    </div>
+  );
+}
+
+
 /* RULE */
 
 function Rule({ text }: { text: string }) {
@@ -739,17 +1924,43 @@ function WalletRow({
   label,
   value,
   strong = false,
+  green = false,
+  red = false,
 }: {
   label: string;
   value: string;
   strong?: boolean;
+  green?: boolean;
+  red?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className={strong ? "font-black text-gray-800" : "font-semibold text-gray-500"}>
+    <div className="flex items-center justify-between gap-0 text-xs leading-tight">
+      <span
+        className={
+          red
+            ? "text-xs font-black text-red-600"
+            : green
+            ? strong
+              ? "text-xs font-black text-emerald-600"
+              : "text-xs font-semibold text-emerald-600"
+            : strong
+            ? "text-xs font-black text-gray-800"
+            : "text-xs font-semibold text-gray-500"
+        }
+      >
         {label}
       </span>
-      <span className={strong ? "font-black text-gray-900" : "font-bold text-gray-700"}>
+      <span
+        className={
+          red
+            ? "text-xs font-black text-red-600"
+            : green
+            ? "text-xs font-black text-emerald-600"
+            : strong
+            ? "text-xs font-black text-gray-900"
+            : "text-xs font-bold text-gray-700"
+        }
+      >
         {value}
       </span>
     </div>

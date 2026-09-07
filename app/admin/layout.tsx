@@ -1,4 +1,4 @@
- "use client";
+"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -9,7 +9,8 @@ const NAV = [
   { icon: "♟", label: "Member Database", href: "/admin/members" },
   { icon: "₹", label: "Deposit Bonus", href: "/admin/deposit-bonus" },
   { icon: "↗", label: "Withdrawals", href: "/admin/withdrawals" },
-  { icon: "♛", label: "Tournaments", href: "/admin#tournaments" },
+  { icon: "♛", label: "Tournaments", href: "/admin/tournaments" },
+  { icon: "＋", label: "Create Tournament", href: "/admin/tournaments/create" },
   { icon: "◌", label: "Support Chat", href: "/admin/support" },
   { icon: "▧", label: "Banners", href: "/admin/banners" },
   { icon: "♢", label: "Notifications", href: "/admin/notifications" },
@@ -25,15 +26,16 @@ export default function AdminLayout({
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
-  // Never show admin navigation on the login screen.
   if (pathname === "/admin/login") {
     return <>{children}</>;
   }
 
   const isActive = (href: string) => {
-    const clean = href.split("#")[0];
-    if (clean === "/admin") return pathname === "/admin";
-    return pathname === clean || pathname.startsWith(clean + "/");
+    if (href === "/admin") {
+      return pathname === "/admin";
+    }
+
+    return pathname === href || pathname.startsWith(href + "/");
   };
 
   return (
@@ -47,6 +49,7 @@ export default function AdminLayout({
           --ga-text: #e9eef7;
           --ga-muted: #7f8ca1;
           --ga-red: #ef1638;
+
           min-height: 100vh;
           background: var(--ga-bg);
           color: var(--ga-text);
@@ -57,11 +60,18 @@ export default function AdminLayout({
           inset: 0 auto 0 0;
           z-index: 100;
           width: 238px;
+
           display: flex;
           flex-direction: column;
+
           background:
-            radial-gradient(circle at 10% 0%, rgba(239,22,56,.09), transparent 28%),
+            radial-gradient(
+              circle at 10% 0%,
+              rgba(239, 22, 56, 0.09),
+              transparent 28%
+            ),
             #0a1019;
+
           border-right: 1px solid var(--ga-border);
           padding: 16px 11px;
           box-sizing: border-box;
@@ -81,17 +91,20 @@ export default function AdminLayout({
           width: 34px;
           height: 34px;
           border-radius: 9px;
+
           display: grid;
           place-items: center;
+
           background: linear-gradient(135deg, #ff294b, #c70d2c);
-          box-shadow: 0 8px 24px rgba(239,22,56,.22);
+          box-shadow: 0 8px 24px rgba(239, 22, 56, 0.22);
+
           font-size: 17px;
         }
 
         .ga-brand-title {
           font-size: 13px;
           font-weight: 900;
-          letter-spacing: .2px;
+          letter-spacing: 0.2px;
           line-height: 1.1;
         }
 
@@ -122,17 +135,23 @@ export default function AdminLayout({
 
         .ga-nav-link {
           min-height: 38px;
+
           display: flex;
           align-items: center;
           gap: 10px;
+
           padding: 0 10px;
+
           border-radius: 8px;
           border: 1px solid transparent;
+
           color: #96a3b6;
           text-decoration: none;
+
           font-size: 11px;
           font-weight: 700;
-          transition: .18s ease;
+
+          transition: 0.18s ease;
         }
 
         .ga-nav-link:hover {
@@ -144,27 +163,41 @@ export default function AdminLayout({
 
         .ga-nav-link.active {
           color: #fff;
-          background: linear-gradient(90deg, #ed1739, #b90e2b);
-          border-color: rgba(255,255,255,.05);
-          box-shadow: 0 7px 20px rgba(239,22,56,.16);
+
+          background: linear-gradient(
+            90deg,
+            #ed1739,
+            #b90e2b
+          );
+
+          border-color: rgba(255, 255, 255, 0.05);
+
+          box-shadow: 0 7px 20px rgba(239, 22, 56, 0.16);
         }
 
         .ga-collapse-button {
           width: 100%;
           height: 30px;
+
           margin: 0 0 8px;
+
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 7px;
+
           border: 1px solid #202e40;
           border-radius: 7px;
+
           background: #0e1723;
           color: #8f9caf;
+
           cursor: pointer;
+
           font-size: 11px;
           font-weight: 800;
-          transition: .18s ease;
+
+          transition: 0.18s ease;
         }
 
         .ga-collapse-button:hover {
@@ -213,13 +246,9 @@ export default function AdminLayout({
           padding: 8px;
         }
 
-        .ga-admin-sidebar.collapsed + .ga-backdrop + .ga-main {
-          margin-left: 72px;
-        }
-
         @media (min-width: 761px) {
           .ga-main {
-            transition: margin-left .22s ease;
+            transition: margin-left 0.22s ease;
           }
 
           .ga-admin-sidebar.collapsed ~ .ga-main {
@@ -242,11 +271,14 @@ export default function AdminLayout({
         .ga-admin-card {
           margin: 10px 2px 0;
           padding: 10px;
+
           display: flex;
           align-items: center;
           gap: 9px;
+
           border: 1px solid #202e40;
           border-radius: 9px;
+
           background: #0f1723;
         }
 
@@ -254,10 +286,13 @@ export default function AdminLayout({
           width: 28px;
           height: 28px;
           border-radius: 8px;
+
           display: grid;
           place-items: center;
+
           background: #18243a;
           color: #ff4964;
+
           font-size: 12px;
           font-weight: 900;
         }
@@ -270,6 +305,7 @@ export default function AdminLayout({
         .ga-admin-card small {
           display: block;
           margin-top: 2px;
+
           color: #647186;
           font-size: 8px;
         }
@@ -281,27 +317,37 @@ export default function AdminLayout({
 
         .ga-mobile-topbar {
           display: none;
+
           position: sticky;
           top: 0;
           z-index: 90;
+
           height: 55px;
+
           align-items: center;
           gap: 10px;
+
           padding: 0 12px;
-          background: rgba(7,11,18,.96);
+
+          background: rgba(7, 11, 18, 0.96);
           border-bottom: 1px solid var(--ga-border);
+
           backdrop-filter: blur(14px);
         }
 
         .ga-menu-button {
           width: 35px;
           height: 35px;
+
           display: grid;
           place-items: center;
+
           border: 1px solid #263448;
           border-radius: 8px;
+
           background: #101925;
           color: #fff;
+
           cursor: pointer;
           font-size: 17px;
         }
@@ -322,9 +368,11 @@ export default function AdminLayout({
         @media (max-width: 760px) {
           .ga-admin-sidebar {
             width: 238px;
+
             transform: translateX(-105%);
-            transition: transform .22s ease;
-            box-shadow: 18px 0 45px rgba(0,0,0,.38);
+            transition: transform 0.22s ease;
+
+            box-shadow: 18px 0 45px rgba(0, 0, 0, 0.38);
           }
 
           .ga-admin-sidebar.open {
@@ -373,34 +421,51 @@ export default function AdminLayout({
 
           .ga-backdrop {
             display: block;
+
             position: fixed;
             inset: 0;
             z-index: 95;
+
             border: 0;
-            background: rgba(0,0,0,.62);
+
+            background: rgba(0, 0, 0, 0.62);
+
             backdrop-filter: blur(2px);
           }
         }
       `}</style>
 
-      <aside className={`ga-admin-sidebar ${open ? "open" : ""} ${collapsed ? "collapsed" : ""}`}>
+      <aside
+        className={`ga-admin-sidebar ${
+          open ? "open" : ""
+        } ${collapsed ? "collapsed" : ""}`}
+      >
         <div className="ga-brand">
           <div className="ga-logo">🎮</div>
+
           <div>
             <div className="ga-brand-title">
               GAMERZ<span>ADDA</span>
             </div>
-            <div className="ga-brand-sub">ADMIN CONTROL</div>
+
+            <div className="ga-brand-sub">
+              ADMIN CONTROL
+            </div>
           </div>
         </div>
 
         <button
           className="ga-collapse-button"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={
+            collapsed ? "Expand sidebar" : "Collapse sidebar"
+          }
+          title={
+            collapsed ? "Expand sidebar" : "Collapse sidebar"
+          }
           onClick={() => setCollapsed((v) => !v)}
         >
           <span>{collapsed ? "»" : "«"}</span>
+
           <span className="ga-collapse-text">
             {collapsed ? "Expand" : "Collapse"}
           </span>
@@ -413,17 +478,23 @@ export default function AdminLayout({
             <Link
               key={item.label}
               href={item.href}
-              className={`ga-nav-link ${isActive(item.href) ? "active" : ""}`}
+              className={`ga-nav-link ${
+                isActive(item.href) ? "active" : ""
+              }`}
               onClick={() => setOpen(false)}
             >
-              <span className="ga-nav-icon">{item.icon}</span>
-              <span className="ga-nav-text">{item.label}</span>
+              <span className="ga-nav-icon">
+                {item.icon}
+              </span>
+
+              <span className="ga-nav-text">
+                {item.label}
+              </span>
             </Link>
           ))}
         </nav>
 
         <div className="ga-system">
-
           <div className="ga-label">SYSTEM</div>
 
           <Link
@@ -437,6 +508,7 @@ export default function AdminLayout({
 
           <div className="ga-admin-card">
             <div className="ga-avatar">A</div>
+
             <div>
               <b>Admin</b>
               <small>Super Admin</small>
@@ -462,6 +534,7 @@ export default function AdminLayout({
           >
             ☰
           </button>
+
           <div className="ga-mobile-title">
             GAMERZ<span>ADDA</span> · ADMIN
           </div>

@@ -1,1005 +1,1042 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "../../../lib/supabase";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-export default function TournamentPage({
-  params,
-}: {
-  params: { id: string };
-}) {
-  const [popup, setPopup] = useState<"how" | "rules" | "join" | null>(null);
-  const [gameName, setGameName] = useState("");
-  const [uid, setUid] = useState("");
-  const [level, setLevel] = useState("");
-  const [walletOpen, setWalletOpen] = useState(false);
-  const [joinError, setJoinError] = useState("");
-  const [joined, setJoined] = useState(false);
+type Tournament = {
+  id: string;
+  title: string;
+  entry: string;
+  prize: string;
+  kill: string;
+  participants: string;
+  joined: string;
+  date: string;
+  map: string;
+  rules: string;
+  mode: string;
+  status: string;
+};
 
-  // Supabase tournament
-  const [tournament, setTournament] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+function formatStartTime(value: string | null) {
+  if (!value) return "Time TBA";
 
-  // Load tournament from Supabase
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Time TBA";
+
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+export default function FreeFirePage() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState("SOLO");
+  const [navActive, setNavActive] = useState<"matches" | "home" | "support">("home");
+  const navRef = useRef<HTMLDivElement | null>(null);
+  const [navDragPosition, setNavDragPosition] = useState(1);
+  const navDragging = useRef(false);
+  const navStartX = useRef(0);
+  const navDraggedClick = useRef(false);
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [tournamentRefreshKey, setTournamentRefreshKey] = useState(0);
+  const [tournamentsLoading, setTournamentsLoading] = useState(true);
+  const [tournamentError, setTournamentError] = useState("");
+  const [banner, setBanner] = useState(0);
+  const [dbBanners, setDbBanners] = useState<
+    { id: string; image_url: string; click_url: string | null; title: string | null }[]
+  >([]);
+  const [bannersLoading, setBannersLoading] = useState(true);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+  const isSwiping = useRef(false);
+
+  // LOAD FREE FIRE BANNERS
   useEffect(() => {
-    async function loadTournament() {
+    async function loadBanners() {
+      setBannersLoading(true);
       const { data, error } = await supabase
-        .from("tournaments")
-        .select("*")
-        .eq("id", params.id)
-        .single();
+        .from("banners")
+        .select("id,image_url,click_url,title")
+        .eq("is_active", true)
+        .eq("game_type", "freefire")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: false });
 
       if (error) {
-        console.error("Tournament fetch error:", error);
-        setTournament(null);
+        console.error("Free Fire banners:", error);
+        setDbBanners([]);
       } else {
-        setTournament(data);
+        setDbBanners(data || []);
       }
-
-      setLoading(false);
+      setBanner(0);
+      setBannersLoading(false);
     }
 
-    loadTournament();
-  }, [params.id]);
+    loadBanners();
+  }, []);
 
-  // Loading screen
-  if (loading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f6f8]">
-        <div className="text-center">
-          <div className="text-5xl">🔥</div>
-          <p className="mt-3 text-sm font-bold text-gray-500">
-            Loading tournament...
-          </p>
-        </div>
-      </main>
-    );
-  }
+  // LOAD TOURNAMENTS FROM DATABASE
+  useEffect(() => {
+    let cancelled = false;
 
-  // Tournament not found
-  if (!tournament) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f6f8]">
-        <div className="px-5 text-center">
-          <div className="text-5xl">😕</div>
+    async function loadTournaments() {
+      setTournamentsLoading(true);
+      setTournamentError("");
 
-          <p className="mt-4 text-xl font-black text-gray-900">
-            Tournament not found
-          </p>
+      try {
+        const { data, error } = await supabase
+          .from("tournaments")
+          .select(
+            "id,title,game,mode,entry_fee,prize_pool,kill_reward,max_players,start_time,map,rules,status,created_at"
+          )
+          .order("created_at", { ascending: false });
 
-          <p className="mt-2 text-sm font-medium text-gray-500">
-            This tournament may have been removed or does not exist.
-          </p>
+        if (error) {
+          console.error("TOURNAMENT DB ERROR:", error);
+          if (!cancelled) {
+            setTournamentError(error.message || "Unable to load tournaments");
+            setTournaments([]);
+          }
+          return;
+        }
 
-          <button
-            onClick={() => window.history.back()}
-            className="mt-5 rounded-xl bg-red-600 px-6 py-3 text-sm font-black text-white"
-          >
-            Go Back
-          </button>
-        </div>
-      </main>
-    );
-  }
+        console.log("TOURNAMENT DB DATA:", data);
 
-  // Dynamic tournament values
-  const availableBalance = 500;
+        const tournamentRows = (data || []).filter((item) => {
+          const game = String(item.game ?? "").trim().toLowerCase();
+          const status = String(item.status ?? "").trim().toLowerCase();
 
-  const entryFee = Number(tournament.entry_fee ?? 0);
+          return (
+            (game === "free fire" || game === "free fire max") &&
+            status === "upcoming"
+          );
+        });
 
-  const balanceAfterJoin = availableBalance - entryFee;
+        const tournamentIds = tournamentRows.map((item) => item.id);
 
-  const maxPlayers = Number(tournament.max_players ?? 0);
+        // A tournament must also disappear from this page when its match is LIVE.
+        const liveTournamentIds = new Set<string>();
+        if (tournamentIds.length > 0) {
+          const { data: matchRows, error: matchError } = await supabase
+            .from("matches")
+            .select("tournament_id,status")
+            .in("tournament_id", tournamentIds);
 
-  const startDate = tournament.start_time
-    ? new Date(tournament.start_time)
-    : null;
+          if (matchError) {
+            console.error("Tournament matches:", matchError);
+          } else {
+            (matchRows || []).forEach((match) => {
+              const matchStatus = String(match.status ?? "").trim().toLowerCase();
+              if (["live", "ongoing", "started", "room_ready"].includes(matchStatus)) {
+                liveTournamentIds.add(match.tournament_id);
+              }
+            });
+          }
+        }
 
-  const formattedDate = startDate
-    ? startDate.toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-    : "Not set";
+        const visibleTournamentRows = tournamentRows.filter(
+          (item) => !liveTournamentIds.has(item.id)
+        );
 
-  const formattedTime = startDate
-    ? startDate.toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-    : "Not set";
+        const visibleTournamentIds = visibleTournamentRows.map((item) => item.id);
+        let joinedCounts: Record<string, number> = {};
 
-  const joinedPlayers = 0;
+        if (visibleTournamentIds.length > 0) {
+          const { data: entries, error: entriesError } = await supabase
+            .from("tournament_entries")
+            .select("tournament_id")
+            .in("tournament_id", visibleTournamentIds);
 
-  const slotsLeft = Math.max(maxPlayers - joinedPlayers, 0);
+          if (entriesError) {
+            console.error("Tournament entries:", entriesError);
+          } else {
+            joinedCounts = (entries || []).reduce(
+              (counts, entry) => {
+                counts[entry.tournament_id] =
+                  (counts[entry.tournament_id] || 0) + 1;
+                return counts;
+              },
+              {} as Record<string, number>
+            );
+          }
+        }
 
-  const progress =
-    maxPlayers > 0
-      ? Math.min((joinedPlayers / maxPlayers) * 100, 100)
-      : 0;
+        const mapped: Tournament[] = visibleTournamentRows.map((item) => ({
+          id: item.id,
+          title: item.title || "Tournament",
+          entry: `₹${Number(item.entry_fee || 0).toLocaleString("en-IN")}`,
+          prize: `₹${Number(item.prize_pool || 0).toLocaleString("en-IN")}`,
+          kill: `₹${Number(item.kill_reward || 0).toLocaleString("en-IN")}/Kill`,
+          participants: String(item.max_players || 0),
+          joined: String(joinedCounts[item.id] || 0),
+          date: formatStartTime(item.start_time),
+          map: item.map || "Bermuda Classic",
+          rules:
+            Array.isArray(item.rules) && item.rules.length > 0
+              ? item.rules.slice(0, 2).join(" • ")
+              : "Read all tournament rules before joining",
+          mode: item.mode || "Solo",
+          status: item.status || "upcoming",
+        }));
 
-  const rules =
-    Array.isArray(tournament.rules) && tournament.rules.length > 0
-      ? tournament.rules
-      : [
-          "Vehicle is not allowed.",
-          "Air Drop is not allowed.",
-          "Double Vector is not allowed.",
-          "Teaming with other players is prohibited.",
-          "Cheating or unfair play may result in disqualification.",
-        ];
+        console.log("FREE FIRE TOURNAMENTS AFTER FILTER:", mapped);
 
-  const openJoinPopup = () => {
-    setPopup("join");
-    setWalletOpen(false);
-    setJoinError("");
-    setJoined(false);
-  };
+        if (!cancelled) {
+          setTournaments(mapped);
+        }
+      } catch (error) {
+        console.error("Free Fire tournaments:", error);
 
-  const closePopup = () => {
-    setPopup(null);
-    setWalletOpen(false);
-    setJoinError("");
-  };
-
-  const handleGameNameChange = (value: string) => {
-    setGameName(
-      value
-        .replace(/[^a-zA-Z0-9 ]/g, "")
-        .toUpperCase()
-        .slice(0, 20)
-    );
-
-    setJoinError("");
-  };
-
-  const handleUidChange = (value: string) => {
-    setUid(value.replace(/\D/g, "").slice(0, 15));
-    setJoinError("");
-  };
-
-  const handleLevelChange = (value: string) => {
-    const digits = value.replace(/\D/g, "").slice(0, 3);
-
-    if (!digits) {
-      setLevel("");
-    } else {
-      setLevel(String(Math.min(100, Math.max(1, Number(digits)))));
+        if (!cancelled) {
+          setTournamentError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load tournaments"
+          );
+          setTournaments([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setTournamentsLoading(false);
+        }
+      }
     }
 
-    setJoinError("");
-  };
+    loadTournaments();
 
-  const handleJoin = () => {
-    if (!gameName.trim()) {
-      setJoinError("Please enter your In-Game Name.");
-      return;
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    async function loadTournaments() {
+      setTournamentsLoading(true);
+
+      try {
+        // Fetch tournaments without client-side database filters first.
+        // This avoids hidden data when the database contains small
+        // differences in game/status text.
+        const { data, error } = await supabase
+          .from("tournaments")
+          .select(
+            "id,title,game,mode,entry_fee,prize_pool,kill_reward,max_players,start_time,map,rules,status"
+          )
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          console.error("TOURNAMENT DB ERROR:", error);
+          throw error;
+        }
+
+        console.log("TOURNAMENT DB DATA:", data);
+
+        const tournamentRows = (data || []).filter((item) => {
+          const game = String(item.game || "").trim().toLowerCase();
+          const status = String(item.status || "").trim().toLowerCase();
+
+          return (
+            game === "free fire" &&
+            status === "upcoming"
+          );
+        });
+        const tournamentIds = tournamentRows.map((item) => item.id);
+
+        // A tournament must also disappear from this page when its match is LIVE.
+        const liveTournamentIds = new Set<string>();
+        if (tournamentIds.length > 0) {
+          const { data: matchRows, error: matchError } = await supabase
+            .from("matches")
+            .select("tournament_id,status")
+            .in("tournament_id", tournamentIds);
+
+          if (matchError) {
+            console.error("Tournament matches:", matchError);
+          } else {
+            (matchRows || []).forEach((match) => {
+              const matchStatus = String(match.status ?? "").trim().toLowerCase();
+              if (["live", "ongoing", "started", "room_ready"].includes(matchStatus)) {
+                liveTournamentIds.add(match.tournament_id);
+              }
+            });
+          }
+        }
+
+        const visibleTournamentRows = tournamentRows.filter(
+          (item) => !liveTournamentIds.has(item.id)
+        );
+
+        const visibleTournamentIds = visibleTournamentRows.map((item) => item.id);
+
+        let joinedCounts: Record<string, number> = {};
+
+        if (visibleTournamentIds.length > 0) {
+          const { data: entries, error: entriesError } = await supabase
+            .from("tournament_entries")
+            .select("tournament_id")
+            .in("tournament_id", visibleTournamentIds);
+
+          if (entriesError) {
+            // Player-count failure must NOT hide tournaments.
+            console.error("Tournament entries:", entriesError);
+          } else {
+            joinedCounts = (entries || []).reduce(
+              (counts, entry) => {
+                counts[entry.tournament_id] =
+                  (counts[entry.tournament_id] || 0) + 1;
+                return counts;
+              },
+              {} as Record<string, number>
+            );
+          }
+        }
+
+        const mapped: Tournament[] = visibleTournamentRows.map((item) => ({
+          id: item.id,
+          title: item.title || "Tournament",
+          entry: `₹${Number(item.entry_fee || 0).toLocaleString("en-IN")}`,
+          prize: `₹${Number(item.prize_pool || 0).toLocaleString("en-IN")}`,
+          kill: `₹${Number(item.kill_reward || 0).toLocaleString("en-IN")}/Kill`,
+          participants: String(item.max_players || 0),
+          joined: String(joinedCounts[item.id] || 0),
+          date: formatStartTime(item.start_time),
+          map: item.map || "Bermuda Classic",
+          rules:
+            Array.isArray(item.rules) && item.rules.length > 0
+              ? item.rules.slice(0, 2).join(" • ")
+              : "Read all tournament rules before joining",
+          mode: item.mode || "Solo",
+          status: item.status || "upcoming",
+        }));
+
+        console.log("FREE FIRE TOURNAMENTS AFTER FILTER:", mapped);
+        setTournaments(mapped);
+      } catch (error) {
+        console.error("Free Fire tournaments:", error);
+        setTournaments([]);
+      } finally {
+        setTournamentsLoading(false);
+      }
     }
 
-    if (!uid) {
-      setJoinError("Please enter your UID.");
-      return;
-    }
+    loadTournaments();
+  }, [tournamentRefreshKey]);
 
-    if (!level || Number(level) < 1 || Number(level) > 100) {
-      setJoinError("Level must be between 1 and 100.");
-      return;
-    }
+  // Keep this page in sync when tournaments/matches change.
+  useEffect(() => {
+    const channel = supabase
+      .channel("freefire-tournament-page-status")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tournaments" },
+        () => setTournamentRefreshKey((prev) => prev + 1)
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "matches" },
+        () => setTournamentRefreshKey((prev) => prev + 1)
+      )
+      .subscribe();
 
-    if (availableBalance < entryFee) {
-      setJoinError("Insufficient wallet balance.");
-      return;
-    }
+    // Fallback in case Realtime is not enabled for these tables.
+    const timer = window.setInterval(() => {
+      setTournamentRefreshKey((prev) => prev + 1);
+    }, 10000);
 
-    setJoined(true);
-    setJoinError("");
-  };
+    return () => {
+      window.clearInterval(timer);
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (dbBanners.length <= 1) return;
+    const timer = setInterval(() => {
+      setBanner((prev) => (prev + 1) % dbBanners.length);
+    }, 3500);
+    return () => clearInterval(timer);
+  }, [dbBanners.length]);
 
   return (
-    <main className="min-h-screen bg-[#f5f6f8] pb-24 text-gray-900">
+    <main className="min-h-screen bg-[#f4f4f4] pb-20 text-black">
+
       {/* HEADER */}
-      <header className="sticky top-0 z-40 bg-gradient-to-r from-red-700 via-red-600 to-red-500 px-4 py-4 text-white shadow-lg">
-        <div className="flex items-center gap-3">
+      <header className="sticky top-0 z-50 bg-[#ff174f] px-4 py-3 text-white shadow-md">
+
+        <div className="flex items-center justify-between">
+
           <button
-            onClick={() => window.history.back()}
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 text-xl"
+            onClick={() => router.back()}
+            aria-label="Go back"
+            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-red-500 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
           >
-            ←
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </span>
           </button>
 
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-red-100">
-              GamerzAdda
-            </p>
-
-            <h1 className="text-lg font-black">
-              Tournament Details
+          <div className="text-center">
+            <h1 className="text-lg font-black tracking-wide">
+              FREE FIRE
             </h1>
+
+            <p className="text-[9px] font-bold tracking-widest">
+              TOURNAMENTS
+            </p>
           </div>
+
+          <div className="rounded-full bg-white/20 px-3 py-1.5 text-xs font-black">
+            ₹0
+          </div>
+
         </div>
       </header>
 
-      {/* TOURNAMENT HERO */}
-      <section className="px-3 pt-3">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-red-700 via-red-600 to-orange-500 p-5 text-white shadow-xl">
-          <div className="absolute -right-8 -top-8 text-8xl opacity-20">
-            🔥
-          </div>
 
-          <div className="relative">
-            <span className="rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase">
-              {tournament.game || "Free Fire"} •{" "}
-              {tournament.mode || "Solo"}
-            </span>
+      {/* =========================
+          SLIDEABLE BANNER
+      ========================= */}
 
-            <h2 className="mt-4 text-2xl font-black leading-tight">
-              {tournament.title}
-            </h2>
+      <section className="px-2.5 pt-2.5">
 
-            <p className="mt-1 text-xs font-semibold text-red-100">
-              Play smart. Survive longer. Win bigger.
-            </p>
+        <div
+          className="relative h-36 overflow-hidden rounded-2xl touch-pan-y select-none"
+          onTouchStart={(e) => {
+            if (dbBanners.length <= 1) return;
+            touchStartX.current = e.touches[0].clientX;
+            touchStartY.current = e.touches[0].clientY;
+            isSwiping.current = false;
+          }}
+          onTouchMove={(e) => {
+            if (touchStartX.current === null || touchStartY.current === null) return;
+            const deltaX = e.touches[0].clientX - touchStartX.current;
+            const deltaY = e.touches[0].clientY - touchStartY.current;
+            if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > Math.abs(deltaY)) {
+              isSwiping.current = true;
+            }
+          }}
+          onTouchEnd={(e) => {
+            if (
+              dbBanners.length <= 1 ||
+              touchStartX.current === null ||
+              touchStartY.current === null
+            ) return;
 
-            <div className="mt-5 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold text-red-100">
-                  PRIZE POOL
-                </p>
+            const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+            const deltaY = e.changedTouches[0].clientY - touchStartY.current;
+            const swipeThreshold = 45;
 
-                <p className="text-2xl font-black">
-                  ₹{Number(tournament.prize_pool ?? 0)}
-                </p>
-              </div>
+            if (Math.abs(deltaX) >= swipeThreshold && Math.abs(deltaX) > Math.abs(deltaY)) {
+              if (deltaX < 0) {
+                setBanner((prev) => (prev + 1) % dbBanners.length);
+              } else {
+                setBanner((prev) => (prev - 1 + dbBanners.length) % dbBanners.length);
+              }
+            }
 
-              <div className="h-10 w-px bg-white/20" />
+            touchStartX.current = null;
+            touchStartY.current = null;
+            isSwiping.current = false;
+          }}
+        >
 
-              <div>
-                <p className="text-[10px] font-bold text-red-100">
-                  ENTRY
-                </p>
-
-                <p className="text-2xl font-black">
-                  ₹{entryFee}
-                </p>
-              </div>
-
-              <div className="h-10 w-px bg-white/20" />
-
-              <div>
-                <p className="text-[10px] font-bold text-red-100">
-                  PLAYERS
-                </p>
-
-                <p className="text-2xl font-black">
-                  {maxPlayers}
-                </p>
-              </div>
+          {bannersLoading ? (
+            <div className="h-full w-full animate-pulse rounded-2xl bg-gray-200" />
+          ) : dbBanners.length === 0 ? (
+            <div className="flex h-full w-full items-center justify-center rounded-2xl bg-gray-200 text-xs font-bold text-gray-500">
+              No Free Fire banners available
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* QUICK ACTIONS */}
-      <section className="px-3 pt-4">
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => setPopup("how")}
-            className="rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm active:scale-[0.98]"
-          >
-            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-xl">
-              🎮
-            </div>
-
-            <p className="text-sm font-black">
-              How To Play
-            </p>
-
-            <p className="mt-1 text-[10px] font-medium text-gray-400">
-              Learn how to join & play
-            </p>
-          </button>
-
-          <button
-            onClick={() => setPopup("rules")}
-            className="rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm active:scale-[0.98]"
-          >
-            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-xl">
-              📜
-            </div>
-
-            <p className="text-sm font-black">
-              Match Rules
-            </p>
-
-            <p className="mt-1 text-[10px] font-medium text-gray-400">
-              Check all tournament rules
-            </p>
-          </button>
-        </div>
-      </section>
-
-      {/* MATCH INFO */}
-      <section className="px-3 pt-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-black">
-            Match Information
-          </h3>
-
-          <span className="rounded-full bg-green-50 px-3 py-1 text-[9px] font-black text-green-600">
-            ● {String(tournament.status || "UPCOMING").toUpperCase()}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <InfoCard
-            icon="💰"
-            label="Entry Fee"
-            value={`₹${entryFee}`}
-          />
-
-          <InfoCard
-            icon="🏆"
-            label="Prize Pool"
-            value={`₹${Number(tournament.prize_pool ?? 0)}`}
-          />
-
-          <InfoCard
-            icon="🎯"
-            label="Kill Point"
-            value={`₹${Number(tournament.kill_reward ?? 0)} / Kill`}
-          />
-
-          <InfoCard
-            icon="🎁"
-            label="Bonus Usable"
-            value="30%"
-          />
-
-          <InfoCard
-            icon="📅"
-            label="Start Date"
-            value={formattedDate}
-          />
-
-          <InfoCard
-            icon="⏰"
-            label="Start Time"
-            value={formattedTime}
-          />
-
-          <InfoCard
-            icon="👥"
-            label="Participants"
-            value={`${maxPlayers} Players`}
-          />
-
-          <InfoCard
-            icon="🗺️"
-            label="Map"
-            value={tournament.map || "Not set"}
-          />
-        </div>
-      </section>
-
-      {/* PLAYERS PROGRESS */}
-      <section className="px-3 pt-5">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-black">
-                Tournament Slots
-              </p>
-
-              <p className="mt-1 text-[10px] font-medium text-gray-400">
-                {joinedPlayers} players joined out of {maxPlayers}
-              </p>
-            </div>
-
-            <p className="text-sm font-black text-red-600">
-              {Math.round(progress)}%
-            </p>
-          </div>
-
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-red-600 to-orange-500"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-
-          <div className="mt-2 flex justify-between text-[9px] font-bold text-gray-400">
-            <span>
-              {joinedPlayers} Joined
-            </span>
-
-            <span>
-              {slotsLeft} Slots Left
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* RULE HIGHLIGHT */}
-      <section className="px-3 pt-5">
-        <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-xl">
-              ⚠️
-            </div>
-
-            <div>
-              <p className="text-sm font-black text-red-700">
-                Important Rules
-              </p>
-
-              <p className="text-[10px] font-medium text-red-500">
-                Read before joining the match
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-2 text-xs font-bold text-gray-700">
-            {rules.map((rule: string, index: number) => (
-              <p key={index}>
-                • {rule.replace(/^•\s*/, "")}
-              </p>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* PRIZE DISTRIBUTION */}
-      <section className="px-3 pt-5">
-        <h3 className="mb-3 text-base font-black">
-          Prize Distribution
-        </h3>
-
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <PrizeRow
-            rank="1st"
-            prize="₹600"
-            icon="🥇"
-          />
-
-          <PrizeRow
-            rank="2nd"
-            prize="₹350"
-            icon="🥈"
-          />
-
-          <PrizeRow
-            rank="3rd"
-            prize="₹275"
-            icon="🥉"
-          />
-        </div>
-      </section>
-
-      {/* BOTTOM ACTIONS */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white/95 p-3 backdrop-blur-md">
-        <div className="mx-auto grid max-w-md grid-cols-3 gap-2">
-          <button className="rounded-xl border border-gray-200 bg-white py-3 text-[10px] font-black text-gray-700 shadow-sm">
-            👤
-            <br />
-            MY MATCHES
-          </button>
-
-          <button className="rounded-xl border border-gray-200 bg-white py-3 text-[10px] font-black text-gray-700 shadow-sm">
-            👥
-            <br />
-            PARTICIPANTS
-          </button>
-
-          <button
-            onClick={openJoinPopup}
-            className="rounded-xl bg-gradient-to-r from-red-600 to-red-500 py-3 text-[10px] font-black text-white shadow-lg shadow-red-200"
-          >
-            🔥
-            <br />
-            JOIN NOW
-          </button>
-        </div>
-      </div>
-
-      {/* POPUP */}
-      {popup && (
-        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 px-2 pb-2 backdrop-blur-sm sm:items-center sm:px-3 sm:pb-3">
-          <div className="max-h-[92vh] w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl sm:max-h-[85vh]">
-
-            <div className="flex items-center justify-between bg-gradient-to-r from-red-700 to-red-500 px-5 py-4 text-white">
-              <h3 className="text-base font-black">
-                {popup === "how"
-                  ? "How To Play"
-                  : popup === "rules"
-                  ? "Match Rules"
-                  : "Join Tournament"}
-              </h3>
-
-              <button
-                onClick={() => setPopup(null)}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-lg"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="max-h-[70vh] overflow-y-auto p-4 sm:max-h-[65vh] sm:p-5">
-
-              {/* HOW TO PLAY */}
-              {popup === "how" && (
-                <div className="space-y-4">
-                  <Step
-                    number="1"
-                    text="Join the tournament using the Join Now button."
-                  />
-
-                  <Step
-                    number="2"
-                    text="Wait for the room details to be provided."
-                  />
-
-                  <Step
-                    number="3"
-                    text="Enter the room before the match starts."
-                  />
-
-                  <Step
-                    number="4"
-                    text="Play according to all tournament rules."
-                  />
-
-                  <Step
-                    number="5"
-                    text="Results will be checked after the match."
-                  />
-
-                  <Step
-                    number="6"
-                    text="Winning amount will be added to your wallet."
-                  />
-                </div>
-              )}
-
-              {/* RULES */}
-              {popup === "rules" && (
-                <div className="space-y-3 text-sm font-semibold text-gray-700">
-                  {rules.map((rule: string, index: number) => (
-                    <Rule
-                      key={index}
-                      text={rule.replace(/^•\s*/, "")}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/* JOIN TOURNAMENT */}
-              {popup === "join" && (
-                <div className="space-y-4">
-
-                  {joined ? (
-                    <div className="py-4 text-center">
-                      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-3xl">
-                        ✓
-                      </div>
-
-                      <h4 className="mt-4 text-xl font-black text-gray-900">
-                        Tournament Joined! 🎉
-                      </h4>
-
-                      <p className="mt-1 text-xs font-medium text-gray-500">
-                        Your entry has been confirmed successfully.
-                      </p>
-
-                      <div className="mt-5 space-y-2 rounded-2xl bg-gray-50 p-4 text-left">
-                        <WalletRow
-                          label="In-Game Name"
-                          value={gameName}
-                          strong
-                        />
-
-                        <WalletRow
-                          label="UID"
-                          value={uid}
-                        />
-
-                        <WalletRow
-                          label="Level"
-                          value={level}
-                        />
-
-                        <WalletRow
-                          label="Entry Fee"
-                          value={`- ₹${entryFee}`}
-                        />
-
-                        <div className="my-2 border-t border-gray-200" />
-
-                        <WalletRow
-                          label="Balance After Join"
-                          value={`₹${balanceAfterJoin}`}
-                          strong
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {/* IN-GAME NAME */}
-                      <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-black text-gray-700">
-                            🎮 IN-GAME NAME
-                          </p>
-
-                          <span className="text-[10px] font-bold text-gray-400">
-                            {gameName.length}/20
-                          </span>
-                        </div>
-
-                        <input
-                          type="text"
-                          value={gameName}
-                          maxLength={20}
-                          autoComplete="off"
-                          placeholder="Enter your in-game name"
-                          onChange={(e) =>
-                            handleGameNameChange(e.target.value)
-                          }
-                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold uppercase outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
-                        />
-
-                        <p className="mt-1 text-[10px] font-medium text-gray-400">
-                          Maximum 20 characters • Automatically uppercase
-                        </p>
-                      </div>
-
-                      {/* UID */}
-                      <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-black text-gray-700">
-                            🆔 UID
-                          </p>
-
-                          <span className="text-[10px] font-bold text-gray-400">
-                            {uid.length}/15
-                          </span>
-                        </div>
-
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={uid}
-                          maxLength={15}
-                          autoComplete="off"
-                          placeholder="Enter Free Fire UID"
-                          onChange={(e) =>
-                            handleUidChange(e.target.value)
-                          }
-                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
-                        />
-
-                        <p className="mt-1 text-[10px] font-medium text-gray-400">
-                          Numbers only • Maximum 15 digits
-                        </p>
-                      </div>
-
-                      {/* LEVEL */}
-                      <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-black text-gray-700">
-                            ⭐ LEVEL
-                          </p>
-
-                          <span className="text-[10px] font-bold text-gray-400">
-                            1–100
-                          </span>
-                        </div>
-
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={1}
-                          max={100}
-                          value={level}
-                          placeholder="Enter your level (1-100)"
-                          onChange={(e) =>
-                            handleLevelChange(e.target.value)
-                          }
-                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
-                        />
-
-                        <p className="mt-1 text-[10px] font-medium text-gray-400">
-                          Level must be between 1 and 100
-                        </p>
-                      </div>
-
-                      {/* ENTRY FEE SUMMARY */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
-                          <p className="text-[9px] font-black uppercase text-red-400">
-                            Entry Fee
-                          </p>
-
-                          <p className="mt-1 text-xl font-black text-red-600">
-                            ₹{entryFee}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl border border-green-100 bg-green-50 p-4">
-                          <p className="text-[9px] font-black uppercase text-green-500">
-                            After Join
-                          </p>
-
-                          <p className="mt-1 text-xl font-black text-green-600">
-                            ₹{balanceAfterJoin}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* COLLAPSED WALLET BREAKDOWN */}
-                      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setWalletOpen((open) => !open)
-                          }
-                          aria-expanded={walletOpen}
-                          className="flex w-full items-center justify-between px-4 py-4 text-left"
-                        >
-                          <div>
-                            <p className="text-sm font-black text-gray-900">
-                              💰 Wallet Breakdown
-                            </p>
-
-                            <p className="mt-0.5 text-[10px] font-medium text-gray-400">
-                              {walletOpen
-                                ? "Hide balance details"
-                                : "Tap to view balance details"}
-                            </p>
-                          </div>
-
-                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-sm font-black text-gray-500 shadow-sm">
-                            {walletOpen ? "⌃" : "⌄"}
-                          </span>
-                        </button>
-
-                        {walletOpen && (
-                          <div className="border-t border-gray-200 px-4 pb-4 pt-2">
-                            <div className="space-y-2.5 text-xs">
-                              <WalletRow
-                                label="Available Balance"
-                                value="₹500"
-                                strong
-                              />
-
-                              <WalletRow
-                                label="Winning Balance"
-                                value="₹200"
-                              />
-
-                              <WalletRow
-                                label="Deposit Balance"
-                                value="₹250"
-                              />
-
-                              <WalletRow
-                                label="Bonus Balance"
-                                value="₹50"
-                              />
-                            </div>
-
-                            <div className="my-3 border-t border-gray-200" />
-
-                            <WalletRow
-                              label="Tournament Entry Fee"
-                              value={`- ₹${entryFee}`}
-                            />
-
-                            <div className="mt-3 rounded-xl bg-white p-3">
-                              <WalletRow
-                                label="Balance After Join"
-                                value={`₹${balanceAfterJoin}`}
-                                strong
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="rounded-xl bg-red-50 p-3 text-center text-[10px] font-bold text-red-600">
-                        ₹{entryFee} will be deducted from your wallet after confirmation.
-                      </div>
-
-                      {joinError && (
-                        <div
-                          role="alert"
-                          className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-600"
-                        >
-                          ⚠️ {joinError}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                </div>
-              )}
-
-            </div>
-
-            <div className="border-t border-gray-100 p-4">
-
-              {popup === "join" ? (
-                joined ? (
-                  <button
-                    onClick={closePopup}
-                    className="w-full rounded-xl bg-gradient-to-r from-green-600 to-green-500 py-3.5 text-sm font-black text-white shadow-lg shadow-green-200"
-                  >
-                    ✓ DONE
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleJoin}
-                    disabled={joined}
-                    className={`flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 text-lg font-black transition-all ${
-                      joined
-                        ? "cursor-default bg-green-600 text-white"
-                        : "bg-red-600 text-white hover:bg-red-700 active:scale-[0.98]"
-                    }`}
-                  >
-                    {joined
-                      ? "✓ JOINED SUCCESSFULLY"
-                      : `🔥 CONFIRM & JOIN • ₹${entryFee}`}
-                  </button>
-                )
-              ) : (
-                <button
-                  onClick={closePopup}
-                  className="w-full rounded-xl bg-red-600 py-3 text-sm font-black text-white"
+          ) : (
+            <>
+              {dbBanners.map((item, index) => (
+                <div
+                  key={item.id}
+                  className={`absolute inset-0 transition-all duration-500 ${
+                    index === banner
+                      ? "translate-x-0 opacity-100"
+                      : index < banner
+                      ? "-translate-x-full opacity-0"
+                      : "translate-x-full opacity-0"
+                  }`}
                 >
-                  GOT IT
-                </button>
-              )}
+                  <a
+                    href={item.click_url || "#"}
+                    onClick={(e) => {
+                      if (!item.click_url) e.preventDefault();
+                    }}
+                    className="block h-full w-full"
+                  >
+                    <img
+                      src={item.image_url}
+                      alt={item.title || "Free Fire banner"}
+                      className="h-full w-full rounded-2xl object-cover"
+                      loading={index === 0 ? "eager" : "lazy"}
+                      decoding="async"
+                    />
+                  </a>
+                </div>
+              ))}
+            </>
+          )}
 
+          {/* DOTS */}
+          {dbBanners.length > 1 && (
+          <div className="absolute bottom-2 left-0 right-0 z-20 flex justify-center gap-1.5">
+
+            {dbBanners.map((_, index) => (
+              <button
+                key={index}
+                onClick={() => setBanner(index)}
+                className={`h-1.5 rounded-full transition-all ${
+                  index === banner
+                    ? "w-5 bg-white"
+                    : "w-1.5 bg-white/50"
+                }`}
+              />
+            ))}
+
+          </div>
+          )}
+
+        </div>
+
+      </section>
+
+
+     {/* GAME MODE SLIDER */}
+
+<div className="bg-white px-3 py-3">
+
+  <div className="relative flex rounded-xl bg-gray-100 p-1">
+
+    {/* SLIDING ACTIVE BACKGROUND */}
+    <div
+      className={`absolute top-1 bottom-1 w-[calc(33.333%-2.67px)] rounded-lg bg-[#ff174f] shadow-md transition-all duration-300 ${
+        activeTab === "SOLO"
+          ? "left-1"
+          : activeTab === "DUO"
+          ? "left-[33.333%]"
+          : "left-[66.666%]"
+      }`}
+    />
+
+    {["SOLO", "DUO", "SQUAD"].map((item) => (
+
+      <button
+        key={item}
+        onClick={() => {
+          setActiveTab(item);
+          setTournamentRefreshKey((prev) => prev + 1);
+        }}
+        className={`relative z-10 flex-1 py-2.5 text-xs font-black transition-colors duration-300 ${
+          activeTab === item
+            ? "text-white"
+            : "text-gray-500"
+        }`}
+      >
+        {item}
+      </button>
+
+    ))}
+
+  </div>
+
+</div>
+
+
+      {/* TOURNAMENTS */}
+
+      <section className="space-y-3 p-2.5">
+
+        <div className="flex items-center justify-between px-1">
+
+          <h2 className="text-sm font-black">
+            🔥 Upcoming Tournaments
+          </h2>
+
+          <span className="text-[8px] font-medium text-gray-500">
+            {tournaments.length} Matches
+          </span>
+
+        </div>
+
+        {tournamentsLoading ? (
+          <div className="rounded-xl bg-white px-4 py-8 text-center text-xs font-bold text-gray-500">
+            Loading tournaments...
+          </div>
+        ) : tournamentError ? (
+          <div className="rounded-xl border border-red-200 bg-white px-4 py-6 text-center">
+            <div className="text-sm font-black text-red-600">
+              Tournament load failed
             </div>
+            <div className="mt-1 break-words text-[10px] font-semibold text-gray-500">
+              {tournamentError}
+            </div>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-3 rounded-lg bg-[#ff174f] px-4 py-2 text-[10px] font-black text-white"
+            >
+              RETRY
+            </button>
+          </div>
+        ) : tournaments.length === 0 ? (
+          <div className="rounded-xl bg-white px-4 py-8 text-center text-xs font-bold text-gray-500">
+            No upcoming tournaments available
+          </div>
+        ) : (
+          tournaments.map((tournament) => (
+            <TournamentCard
+              key={tournament.id}
+              tournament={tournament}
+            />
+          ))
+        )}
+
+      </section>
+
+
+      {/* =========================
+          PREMIUM BOTTOM NAV
+      ========================= */}
+
+      <nav className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3">
+        <div className="mx-auto max-w-md">
+          <div
+            ref={navRef}
+            className="relative flex h-[68px] items-center rounded-[22px] border border-white/60 bg-white/35 p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-2xl backdrop-saturate-150 touch-none select-none"
+            onPointerDown={(e) => {
+              if (e.pointerType === "mouse" && e.button !== 0) return;
+              navStartX.current = e.clientX;
+              navDragging.current = false;
+              navDraggedClick.current = false;
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+            }}
+            onPointerMove={(e) => {
+              if (!e.currentTarget.hasPointerCapture?.(e.pointerId)) return;
+
+              const rect = e.currentTarget.getBoundingClientRect();
+              const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+              const cell = rect.width / 3;
+              const position = Math.max(
+                0,
+                Math.min(2, x / cell - 0.5)
+              );
+
+              if (Math.abs(e.clientX - navStartX.current) > 4) {
+                navDragging.current = true;
+                navDraggedClick.current = true;
+              }
+
+              setNavDragPosition(position);
+
+              const index = Math.max(
+                0,
+                Math.min(2, Math.round(position))
+              );
+
+              const next =
+                index === 0
+                  ? "matches"
+                  : index === 1
+                  ? "home"
+                  : "support";
+
+              setNavActive(next);
+            }}
+            onPointerUp={(e) => {
+              if (!e.currentTarget.hasPointerCapture?.(e.pointerId)) return;
+
+              const rect = e.currentTarget.getBoundingClientRect();
+              const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+              const index = Math.max(
+                0,
+                Math.min(2, Math.round(x / (rect.width / 3) - 0.5))
+              );
+
+              const next =
+                index === 0
+                  ? "matches"
+                  : index === 1
+                  ? "home"
+                  : "support";
+
+              setNavActive(next);
+              setNavDragPosition(index);
+              e.currentTarget.releasePointerCapture?.(e.pointerId);
+
+              if (navDragging.current) {
+                navDragging.current = false;
+
+                if (next === "matches") {
+                  window.location.href = "/freefire/tournament/mymatches";
+                } else if (next === "home") {
+                  window.location.href = "/";
+                } else {
+                  alert("Help & Support");
+                }
+              }
+            }}
+            onPointerCancel={(e) => {
+              navDragging.current = false;
+              e.currentTarget.releasePointerCapture?.(e.pointerId);
+              setNavDragPosition(
+                navActive === "matches"
+                  ? 0
+                  : navActive === "home"
+                  ? 1
+                  : 2
+              );
+            }}
+          >
+
+            {/* SLIDING ACTIVE PILL */}
+            <span
+              className={`pointer-events-none absolute bottom-1.5 top-1.5 left-1.5 w-[calc(33.333%_-_4px)] rounded-[18px] bg-gradient-to-b from-red-50 via-pink-50 to-white shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_5px_16px_rgba(255,23,79,0.12)] ${
+                navDragging.current
+                  ? "transition-none scale-[1.03]"
+                  : "transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+              }`}
+              style={{
+                transform: `translate3d(${navDragPosition * 100}%, 0, 0)`,
+                willChange: "transform",
+              }}
+            />
+
+            {/* MY MATCHES */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (navDraggedClick.current) {
+                  e.preventDefault();
+                  navDraggedClick.current = false;
+                  return;
+                }
+                setNavActive("matches");
+                setNavDragPosition(0);
+                window.location.href = "/freefire/tournament/mymatches";
+              }}
+              className="relative z-10 flex h-full flex-1 flex-col items-center justify-center rounded-[18px] transition-transform active:scale-95"
+            >
+              <span className="text-[21px] leading-none">👤</span>
+              <span
+                className={`mt-1 text-[9px] font-black tracking-wide ${
+                  navActive === "matches" ? "text-red-600" : "text-gray-700"
+                }`}
+              >
+                MY MATCHES
+              </span>
+            </button>
+
+            {/* HOME */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (navDraggedClick.current) {
+                  e.preventDefault();
+                  navDraggedClick.current = false;
+                  return;
+                }
+                setNavActive("home");
+                setNavDragPosition(1);
+                window.location.href = "/";
+              }}
+              className="relative z-10 flex h-full flex-1 flex-col items-center justify-center rounded-[18px] transition-transform active:scale-95"
+            >
+              <span className="text-[21px] leading-none">🏠</span>
+              <span
+                className={`mt-1 text-[9px] font-black tracking-wide ${
+                  navActive === "home" ? "text-red-600" : "text-gray-700"
+                }`}
+              >
+                HOME
+              </span>
+            </button>
+
+            {/* SUPPORT */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (navDraggedClick.current) {
+                  e.preventDefault();
+                  navDraggedClick.current = false;
+                  return;
+                }
+                setNavActive("support");
+                setNavDragPosition(2);
+              }}
+              className="relative z-10 flex h-full flex-1 flex-col items-center justify-center rounded-[18px] transition-transform active:scale-95"
+            >
+              <span className="text-[21px] leading-none">🎧</span>
+              <span
+                className={`mt-1 text-[9px] font-black tracking-wide ${
+                  navActive === "support" ? "text-red-600" : "text-gray-700"
+                }`}
+              >
+                SUPPORT
+              </span>
+            </button>
+
           </div>
         </div>
-      )}
+      </nav>
+
     </main>
   );
 }
 
 
-/* INFO CARD */
+/* =========================
+   TOURNAMENT CARD
+========================= */
 
-function InfoCard({
-  icon,
-  label,
-  value,
+function TournamentCard({
+  tournament,
 }: {
-  icon: string;
-  label: string;
-  value: string;
+  tournament: Tournament;
 }) {
+  const percentage =
+    Number(tournament.participants) > 0
+      ? (Number(tournament.joined) /
+          Number(tournament.participants)) *
+        100
+      : 0;
+
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-50 text-lg">
-          {icon}
+
+    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+
+      {/* TITLE */}
+
+      <div className="flex gap-1 px-2 pt-2 pb-1">
+
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center">
+          <img
+            src="/freefire-icon.png"
+            alt="Free Fire"
+            className="h-12 w-12 object-contain"
+          />
         </div>
 
         <div className="min-w-0">
-          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">
-            {label}
+
+          <h2 className="text-[13px] font-bold leading-tight">
+            {tournament.title}
+          </h2>
+
+          <p className="mt-0 text-[8px] leading-[10px] text-gray-600">
+            {tournament.rules}
           </p>
 
-          <p className="mt-1 truncate text-sm font-black">
-            {value}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-/* PRIZE ROW */
-
-function PrizeRow({
-  rank,
-  prize,
-  icon,
-}: {
-  rank: string;
-  prize: string;
-  icon: string;
-}) {
-  return (
-    <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4 last:border-0">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50 text-xl">
-          {icon}
         </div>
 
-        <p className="text-sm font-black">
-          {rank} Place
-        </p>
       </div>
 
-      <p className="text-base font-black text-red-600">
-        {prize}
-      </p>
-    </div>
-  );
-}
 
+      {/* ENTRY / PRIZE / KILL */}
 
-/* STEP */
+      <div className="grid grid-cols-3 border-y border-gray-100">
 
-function Step({
-  number,
-  text,
-}: {
-  number: string;
-  text: string;
-}) {
-  return (
-    <div className="flex gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-600 text-xs font-black text-white">
-        {number}
+        <InfoBox
+          icon="👑"
+          title="Entry"
+          value={tournament.entry}
+        />
+
+        <InfoBox
+          icon="🏆"
+          title="Prize"
+          value={tournament.prize}
+        />
+
+        <InfoBox
+          icon="🪙"
+          title="Kill Point"
+          value={tournament.kill}
+        />
+
       </div>
 
-      <p className="pt-1 text-sm font-semibold leading-5 text-gray-700">
-        {text}
-      </p>
-    </div>
-  );
-}
+
+      {/* PROGRESS */}
+
+      <div className="px-2 pt-1">
+
+        <div className="mb-0 flex justify-between">
+
+          <span className="text-[8px] font-medium text-gray-500">
+            Filling Fast
+          </span>
+
+          <span className="text-[8px] font-bold">
+            {tournament.joined}/{tournament.participants}
+          </span>
+
+        </div>
+
+        <div className="h-1 overflow-hidden rounded-full bg-gray-200">
+
+          <div
+            className="h-full rounded-full bg-[#ff174f]"
+            style={{
+              width: `${percentage}%`,
+            }}
+          />
+
+        </div>
+
+      </div>
 
 
-/* RULE */
+      {/* DETAILS */}
 
-function Rule({ text }: { text: string }) {
-  return (
-    <div className="rounded-xl bg-gray-50 p-3">
-      <p>• {text}</p>
-    </div>
-  );
-}
+      <div className="grid grid-cols-3 gap-0.5 p-2">
+
+        <DetailBox
+          icon="◷"
+          title="Start Date"
+          value={tournament.date}
+        />
+
+        <DetailBox
+          icon="👥"
+          title="Participants"
+          value={tournament.participants}
+        />
+
+        <DetailBox
+          icon="🗺️"
+          title="Map"
+          value={tournament.map}
+        />
+
+      </div>
 
 
-/* WALLET ROW */
+      {/* VIEW */}
 
-function WalletRow({
-  label,
-  value,
-  strong = false,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between">
-      <span
-        className={
-          strong
-            ? "font-black text-gray-800"
-            : "font-semibold text-gray-500"
-        }
+      <button
+        type="button"
+        onClick={() => {
+          window.location.href = `/freefire/tournament/${tournament.id}`;
+        }}
+        className="w-full bg-[#ff174f] py-2 text-[11px] font-bold tracking-wide text-white active:scale-[0.99]"
       >
+        VIEW →
+      </button>
+
+    </div>
+  );
+}
+
+/* =========================
+   INFO BOX
+========================= */
+
+function InfoBox({
+  icon,
+  title,
+  value,
+}: {
+  icon: string;
+  title: string;
+  value: string;
+}) {
+  return (
+    <div className="px-1 py-1.5 text-center">
+
+      <div className="text-[8px] font-medium text-gray-500">
+        {icon} {title}
+      </div>
+
+      <div className="mt-0 text-[11px] font-bold text-green-600">
+        {value}
+      </div>
+
+    </div>
+  );
+}
+
+
+/* =========================
+   DETAIL BOX
+========================= */
+
+function DetailBox({
+  icon,
+  title,
+  value,
+}: {
+  icon: string;
+  title: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg bg-gray-50 px-0.5 py-1 text-center">
+
+      <div className="text-[8px] font-medium text-gray-500">
+        {icon} {title}
+      </div>
+
+      <div className="mt-0.5 text-[8px] font-bold text-gray-700">
+        {value}
+      </div>
+
+    </div>
+  );
+}
+
+
+/* =========================
+   BOTTOM NAV BUTTON
+========================= */
+
+function BottomButton({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-1 flex-col items-center justify-center py-2 ${
+        active ? "text-red-600" : "text-gray-700"
+      }`}
+    >
+
+      <span className="text-[21px] leading-5">
+        {icon}
+      </span>
+
+      <span className="mt-1 text-[10px] font-bold">
         {label}
       </span>
 
-      <span
-        className={
-          strong
-            ? "font-black text-gray-900"
-            : "font-bold text-gray-700"
-        }
-      >
-        {value}
-      </span>
-    </div>
+    </button>
   );
 }

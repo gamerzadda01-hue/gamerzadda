@@ -492,7 +492,7 @@ export default function Home() {
               </DrawerGroup>
 
               <DrawerGroup title="GAMING">
-                <DrawerItem icon="leaderboard" text="Leaderboard" />
+                <DrawerItem icon="🏆" text="Leaderboard" />
                 <DrawerItem icon="📊" text="My Stats" />
               </DrawerGroup>
 
