@@ -9,9 +9,45 @@ function hashValue(value: string) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
+async function findAdminByUserId(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("id, email, role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("LIVE KEYS USER ROLE ERROR:", error);
+    return null;
+  }
+
+  return data;
+}
+
+async function findAdminByEmail(email: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("id, email, role")
+    .ilike("email", normalizedEmail)
+    .maybeSingle();
+
+  if (error) {
+    console.error("LIVE KEYS EMAIL ROLE ERROR:", error);
+    return null;
+  }
+
+  return data;
+}
+
 async function requireAdmin(request: NextRequest) {
   // --------------------------------------------------
-  // 1. TRY BEARER TOKEN
+  // 1. TRY SUPABASE AUTH BEARER TOKEN
   // --------------------------------------------------
   const authorization = request.headers.get("authorization") || "";
 
@@ -20,40 +56,37 @@ async function requireAdmin(request: NextRequest) {
     : "";
 
   if (bearerToken) {
-    const { data, error } =
-      await supabaseAdmin.auth.getUser(bearerToken);
+    const { data, error } = await supabaseAdmin.auth.getUser(bearerToken);
 
     if (!error && data?.user?.id) {
-      const { data: admin, error: adminError } =
-        await supabaseAdmin
-          .from("users")
-          .select("role")
-          .eq("id", data.user.id)
-          .maybeSingle();
+      let admin = await findAdminByUserId(data.user.id);
 
-      if (!adminError && admin?.role === "admin") {
-        return {
-          ok: true,
-          userId: data.user.id,
-        };
+      // Some Gamerzadda installations use the public users table ID
+      // independently from the Supabase Auth user ID. In that case,
+      // match the admin account by its verified Supabase Auth email.
+      if (admin?.role !== "admin" && data.user.email) {
+        admin = await findAdminByEmail(data.user.email);
       }
 
-      return {
-        ok: false,
-        error: "Access denied. Admin only.",
-      };
+      if (admin?.role === "admin") {
+        return {
+          ok: true as const,
+          userId: admin.id,
+        };
+      }
+    } else {
+      console.error("LIVE KEYS BEARER ERROR:", error);
     }
   }
 
   // --------------------------------------------------
   // 2. TRY GAMERZADDA SESSION COOKIE
   // --------------------------------------------------
-  const token =
-    request.cookies.get("gamerzadda_session")?.value;
+  const token = request.cookies.get("gamerzadda_session")?.value;
 
   if (!token) {
     return {
-      ok: false,
+      ok: false as const,
       error: "Admin login required.",
     };
   }
@@ -63,23 +96,22 @@ async function requireAdmin(request: NextRequest) {
   try {
     sessionToken = decodeURIComponent(token);
   } catch {
-    // Use original token
+    // Use original token if it is not URI encoded.
   }
 
   const tokenHash = hashValue(sessionToken);
 
-  const { data: session, error: sessionError } =
-    await supabaseAdmin
-      .from("user_sessions")
-      .select("user_id, expires_at")
-      .eq("token_hash", tokenHash)
-      .maybeSingle();
+  const { data: session, error: sessionError } = await supabaseAdmin
+    .from("user_sessions")
+    .select("user_id, expires_at")
+    .eq("token_hash", tokenHash)
+    .maybeSingle();
 
   if (sessionError || !session?.user_id) {
     console.error("LIVE KEYS SESSION ERROR:", sessionError);
 
     return {
-      ok: false,
+      ok: false as const,
       error: "Invalid session.",
     };
   }
@@ -89,7 +121,7 @@ async function requireAdmin(request: NextRequest) {
     new Date(session.expires_at) <= new Date()
   ) {
     return {
-      ok: false,
+      ok: false as const,
       error: "Session expired.",
     };
   }
@@ -97,24 +129,22 @@ async function requireAdmin(request: NextRequest) {
   // --------------------------------------------------
   // 3. VERIFY ADMIN ROLE
   // --------------------------------------------------
-  const { data: admin, error: adminError } =
-    await supabaseAdmin
-      .from("users")
-      .select("role")
-      .eq("id", session.user_id)
-      .maybeSingle();
+  const admin = await findAdminByUserId(session.user_id);
 
-  if (adminError || admin?.role !== "admin") {
-    console.error("LIVE KEYS ADMIN ERROR:", adminError);
+  if (admin?.role !== "admin") {
+    console.error("LIVE KEYS ADMIN ERROR: user is not admin", {
+      userId: session.user_id,
+      role: admin?.role ?? null,
+    });
 
     return {
-      ok: false,
+      ok: false as const,
       error: "Access denied. Admin only.",
     };
   }
 
   return {
-    ok: true,
+    ok: true as const,
     userId: session.user_id,
   };
 }
@@ -141,17 +171,9 @@ export async function POST(request: NextRequest) {
     // --------------------------------------------------
     const body = await request.json();
 
-    const tournamentId = String(
-      body?.tournamentId || ""
-    ).trim();
-
-    const roomId = String(
-      body?.roomId || ""
-    ).trim();
-
-    const roomPassword = String(
-      body?.roomPassword || ""
-    ).trim();
+    const tournamentId = String(body?.tournamentId || "").trim();
+    const roomId = String(body?.roomId || "").trim();
+    const roomPassword = String(body?.roomPassword || "").trim();
 
     if (!tournamentId) {
       return NextResponse.json(
@@ -237,15 +259,14 @@ export async function POST(request: NextRequest) {
     if (existingMatch?.id) {
       matchId = existingMatch.id;
 
-      const { error: matchUpdateError } =
-        await supabaseAdmin
-          .from("matches")
-          .update({
-            room_id: roomId,
-            room_password: roomPassword,
-            status: "live",
-          })
-          .eq("id", existingMatch.id);
+      const { error: matchUpdateError } = await supabaseAdmin
+        .from("matches")
+        .update({
+          room_id: roomId,
+          room_password: roomPassword,
+          status: "live",
+        })
+        .eq("id", existingMatch.id);
 
       if (matchUpdateError) {
         throw matchUpdateError;
@@ -256,26 +277,23 @@ export async function POST(request: NextRequest) {
     // 6. CREATE MATCH IF NOT FOUND
     // --------------------------------------------------
     else {
-      const { data: newMatch, error: insertError } =
-        await supabaseAdmin
-          .from("matches")
-          .insert({
-            tournament_id: tournamentId,
-            room_id: roomId,
-            room_password: roomPassword,
-            status: "live",
-          })
-          .select("id")
-          .single();
+      const { data: newMatch, error: insertError } = await supabaseAdmin
+        .from("matches")
+        .insert({
+          tournament_id: tournamentId,
+          room_id: roomId,
+          room_password: roomPassword,
+          status: "live",
+        })
+        .select("id")
+        .single();
 
       if (insertError) {
         throw insertError;
       }
 
       if (!newMatch?.id) {
-        throw new Error(
-          "Match was created but ID was not returned."
-        );
+        throw new Error("Match was created but ID was not returned.");
       }
 
       matchId = newMatch.id;
@@ -284,13 +302,13 @@ export async function POST(request: NextRequest) {
     // --------------------------------------------------
     // 7. MAKE TOURNAMENT LIVE
     // --------------------------------------------------
-    const { error: tournamentUpdateError } =
-      await supabaseAdmin
-        .from("tournaments")
-        .update({
-          status: "live",
-        })
-        .eq("id", tournamentId);
+    const { error: tournamentUpdateError } = await supabaseAdmin
+      .from("tournaments")
+      .update({
+        status: "live",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", tournamentId);
 
     if (tournamentUpdateError) {
       throw tournamentUpdateError;
@@ -302,9 +320,7 @@ export async function POST(request: NextRequest) {
     const { data: verifiedMatch, error: verifyMatchError } =
       await supabaseAdmin
         .from("matches")
-        .select(
-          "id, tournament_id, room_id, room_password, status"
-        )
+        .select("id, tournament_id, room_id, room_password, status")
         .eq("id", matchId)
         .maybeSingle();
 
@@ -313,14 +329,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (!verifiedMatch) {
-      throw new Error(
-        "Match could not be verified."
-      );
+      throw new Error("Match could not be verified.");
     }
 
-    if (
-      String(verifiedMatch.status).toLowerCase() !== "live"
-    ) {
+    if (String(verifiedMatch.status).toLowerCase() !== "live") {
       throw new Error(
         `Match status verification failed. Database status is "${verifiedMatch.status}".`
       );
@@ -329,29 +341,22 @@ export async function POST(request: NextRequest) {
     // --------------------------------------------------
     // 9. VERIFY TOURNAMENT
     // --------------------------------------------------
-    const {
-      data: verifiedTournament,
-      error: verifyTournamentError,
-    } = await supabaseAdmin
-      .from("tournaments")
-      .select("id, status")
-      .eq("id", tournamentId)
-      .maybeSingle();
+    const { data: verifiedTournament, error: verifyTournamentError } =
+      await supabaseAdmin
+        .from("tournaments")
+        .select("id, status")
+        .eq("id", tournamentId)
+        .maybeSingle();
 
     if (verifyTournamentError) {
       throw verifyTournamentError;
     }
 
     if (!verifiedTournament) {
-      throw new Error(
-        "Tournament could not be verified."
-      );
+      throw new Error("Tournament could not be verified.");
     }
 
-    if (
-      String(verifiedTournament.status).toLowerCase() !==
-      "live"
-    ) {
+    if (String(verifiedTournament.status).toLowerCase() !== "live") {
       throw new Error(
         `Tournament status verification failed. Database status is "${verifiedTournament.status}".`
       );

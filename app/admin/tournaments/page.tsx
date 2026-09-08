@@ -170,11 +170,23 @@ export default function TournamentsAdminPage() {
     setLiveKeysSaving(tournamentId);
 
     try {
+      // Get the current Supabase Auth session so the API can verify
+      // the logged-in admin using a Bearer access token.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
+
       const response = await fetch("/api/admin/keys", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
         credentials: "include",
         cache: "no-store",
         body: JSON.stringify({
