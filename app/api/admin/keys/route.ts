@@ -9,11 +9,53 @@ function hashValue(value: string) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-async function getAdminUserId(request: NextRequest) {
-  const token = request.cookies.get("gamerzadda_session")?.value;
+async function requireAdmin(request: NextRequest) {
+  // --------------------------------------------------
+  // 1. TRY BEARER TOKEN
+  // --------------------------------------------------
+  const authorization = request.headers.get("authorization") || "";
+
+  const bearerToken = authorization.startsWith("Bearer ")
+    ? authorization.slice(7).trim()
+    : "";
+
+  if (bearerToken) {
+    const { data, error } =
+      await supabaseAdmin.auth.getUser(bearerToken);
+
+    if (!error && data?.user?.id) {
+      const { data: admin, error: adminError } =
+        await supabaseAdmin
+          .from("users")
+          .select("role")
+          .eq("id", data.user.id)
+          .maybeSingle();
+
+      if (!adminError && admin?.role === "admin") {
+        return {
+          ok: true,
+          userId: data.user.id,
+        };
+      }
+
+      return {
+        ok: false,
+        error: "Access denied. Admin only.",
+      };
+    }
+  }
+
+  // --------------------------------------------------
+  // 2. TRY GAMERZADDA SESSION COOKIE
+  // --------------------------------------------------
+  const token =
+    request.cookies.get("gamerzadda_session")?.value;
 
   if (!token) {
-    return null;
+    return {
+      ok: false,
+      error: "Admin login required.",
+    };
   }
 
   let sessionToken = token;
@@ -21,76 +63,95 @@ async function getAdminUserId(request: NextRequest) {
   try {
     sessionToken = decodeURIComponent(token);
   } catch {
-    // Keep original token if decoding fails
+    // Use original token
   }
 
   const tokenHash = hashValue(sessionToken);
 
-  const { data: session, error: sessionError } = await supabaseAdmin
-    .from("user_sessions")
-    .select("user_id, expires_at")
-    .eq("token_hash", tokenHash)
-    .maybeSingle();
+  const { data: session, error: sessionError } =
+    await supabaseAdmin
+      .from("user_sessions")
+      .select("user_id, expires_at")
+      .eq("token_hash", tokenHash)
+      .maybeSingle();
 
-  if (sessionError) {
-    console.error("ADMIN SESSION ERROR:", sessionError);
-    return null;
-  }
+  if (sessionError || !session?.user_id) {
+    console.error("LIVE KEYS SESSION ERROR:", sessionError);
 
-  if (!session?.user_id) {
-    return null;
+    return {
+      ok: false,
+      error: "Invalid session.",
+    };
   }
 
   if (
     session.expires_at &&
-    new Date(session.expires_at).getTime() <= Date.now()
+    new Date(session.expires_at) <= new Date()
   ) {
-    return null;
+    return {
+      ok: false,
+      error: "Session expired.",
+    };
   }
 
-  const { data: user, error: userError } = await supabaseAdmin
-    .from("users")
-    .select("id, role")
-    .eq("id", session.user_id)
-    .maybeSingle();
+  // --------------------------------------------------
+  // 3. VERIFY ADMIN ROLE
+  // --------------------------------------------------
+  const { data: admin, error: adminError } =
+    await supabaseAdmin
+      .from("users")
+      .select("role")
+      .eq("id", session.user_id)
+      .maybeSingle();
 
-  if (userError) {
-    console.error("ADMIN USER ERROR:", userError);
-    return null;
+  if (adminError || admin?.role !== "admin") {
+    console.error("LIVE KEYS ADMIN ERROR:", adminError);
+
+    return {
+      ok: false,
+      error: "Access denied. Admin only.",
+    };
   }
 
-  if (!user || user.role !== "admin") {
-    return null;
-  }
-
-  return String(user.id);
+  return {
+    ok: true,
+    userId: session.user_id,
+  };
 }
 
 export async function POST(request: NextRequest) {
   try {
     // --------------------------------------------------
-    // 1. VERIFY ADMIN
+    // 1. ADMIN AUTHENTICATION
     // --------------------------------------------------
-    const adminUserId = await getAdminUserId(request);
+    const auth = await requireAdmin(request);
 
-    if (!adminUserId) {
+    if (!auth.ok) {
       return NextResponse.json(
         {
           success: false,
-          error: "Unauthorized",
+          error: auth.error,
         },
         { status: 401 }
       );
     }
 
     // --------------------------------------------------
-    // 2. READ REQUEST BODY
+    // 2. READ BODY
     // --------------------------------------------------
     const body = await request.json();
 
-    const tournamentId = String(body?.tournamentId || "").trim();
-    const roomId = String(body?.roomId || "").trim();
-    const roomPassword = String(body?.roomPassword || "").trim();
+    const tournamentId = String(
+      body?.tournamentId || ""
+    ).trim();
+
+    const roomId = String(
+      body?.roomId || ""
+    ).trim();
+
+    const roomPassword = String(
+      body?.roomPassword || ""
+    ).trim();
 
     if (!tournamentId) {
       return NextResponse.json(
@@ -122,15 +183,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log("=================================");
-    console.log("LIVE KEYS REQUEST");
-    console.log("Admin:", adminUserId);
-    console.log("Tournament:", tournamentId);
-    console.log("Room ID:", roomId);
-    console.log("=================================");
+    console.log("LIVE KEYS REQUEST:", {
+      adminUserId: auth.userId,
+      tournamentId,
+      roomId,
+    });
 
     // --------------------------------------------------
-    // 3. VERIFY TOURNAMENT EXISTS
+    // 3. CHECK TOURNAMENT
     // --------------------------------------------------
     const { data: tournament, error: tournamentFindError } =
       await supabaseAdmin
@@ -140,11 +200,6 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
     if (tournamentFindError) {
-      console.error(
-        "TOURNAMENT FIND ERROR:",
-        tournamentFindError
-      );
-
       throw tournamentFindError;
     }
 
@@ -159,7 +214,7 @@ export async function POST(request: NextRequest) {
     }
 
     // --------------------------------------------------
-    // 4. FIND EXISTING MATCH
+    // 4. FIND MATCH
     // --------------------------------------------------
     const { data: existingMatch, error: matchFindError } =
       await supabaseAdmin
@@ -171,11 +226,6 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
     if (matchFindError) {
-      console.error(
-        "MATCH FIND ERROR:",
-        matchFindError
-      );
-
       throw matchFindError;
     }
 
@@ -187,30 +237,26 @@ export async function POST(request: NextRequest) {
     if (existingMatch?.id) {
       matchId = existingMatch.id;
 
-      const { error: matchUpdateError } = await supabaseAdmin
-        .from("matches")
-        .update({
-          room_id: roomId,
-          room_password: roomPassword,
-          status: "live",
-        })
-        .eq("id", existingMatch.id);
+      const { error: matchUpdateError } =
+        await supabaseAdmin
+          .from("matches")
+          .update({
+            room_id: roomId,
+            room_password: roomPassword,
+            status: "live",
+          })
+          .eq("id", existingMatch.id);
 
       if (matchUpdateError) {
-        console.error(
-          "MATCH UPDATE ERROR:",
-          matchUpdateError
-        );
-
         throw matchUpdateError;
       }
     }
 
     // --------------------------------------------------
-    // 6. CREATE MATCH IF NONE EXISTS
+    // 6. CREATE MATCH IF NOT FOUND
     // --------------------------------------------------
     else {
-      const { data: newMatch, error: insertMatchError } =
+      const { data: newMatch, error: insertError } =
         await supabaseAdmin
           .from("matches")
           .insert({
@@ -222,18 +268,13 @@ export async function POST(request: NextRequest) {
           .select("id")
           .single();
 
-      if (insertMatchError) {
-        console.error(
-          "MATCH INSERT ERROR:",
-          insertMatchError
-        );
-
-        throw insertMatchError;
+      if (insertError) {
+        throw insertError;
       }
 
       if (!newMatch?.id) {
         throw new Error(
-          "Match was created but match ID was not returned."
+          "Match was created but ID was not returned."
         );
       }
 
@@ -243,7 +284,7 @@ export async function POST(request: NextRequest) {
     // --------------------------------------------------
     // 7. MAKE TOURNAMENT LIVE
     // --------------------------------------------------
-    const { error: tournamentStatusError } =
+    const { error: tournamentUpdateError } =
       await supabaseAdmin
         .from("tournaments")
         .update({
@@ -251,13 +292,8 @@ export async function POST(request: NextRequest) {
         })
         .eq("id", tournamentId);
 
-    if (tournamentStatusError) {
-      console.error(
-        "TOURNAMENT STATUS UPDATE ERROR:",
-        tournamentStatusError
-      );
-
-      throw tournamentStatusError;
+    if (tournamentUpdateError) {
+      throw tournamentUpdateError;
     }
 
     // --------------------------------------------------
@@ -273,17 +309,12 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
     if (verifyMatchError) {
-      console.error(
-        "MATCH VERIFY ERROR:",
-        verifyMatchError
-      );
-
       throw verifyMatchError;
     }
 
     if (!verifiedMatch) {
       throw new Error(
-        "Match could not be verified after update."
+        "Match could not be verified."
       );
     }
 
@@ -308,17 +339,12 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (verifyTournamentError) {
-      console.error(
-        "TOURNAMENT VERIFY ERROR:",
-        verifyTournamentError
-      );
-
       throw verifyTournamentError;
     }
 
     if (!verifiedTournament) {
       throw new Error(
-        "Tournament could not be verified after update."
+        "Tournament could not be verified."
       );
     }
 
@@ -334,34 +360,26 @@ export async function POST(request: NextRequest) {
     // --------------------------------------------------
     // 10. SUCCESS
     // --------------------------------------------------
-    console.log("=================================");
-    console.log("LIVE KEYS SUCCESS");
-    console.log("Tournament:", tournamentId);
-    console.log("Match:", matchId);
-    console.log(
-      "Tournament Status:",
-      verifiedTournament.status
-    );
-    console.log("Match Status:", verifiedMatch.status);
-    console.log("=================================");
+    console.log("LIVE KEYS SUCCESS:", {
+      adminUserId: auth.userId,
+      tournamentId,
+      matchId,
+      tournamentStatus: verifiedTournament.status,
+      matchStatus: verifiedMatch.status,
+    });
 
     return NextResponse.json({
       success: true,
       message: "LIVE KEYS sent to users successfully.",
-
       tournamentId,
       matchId,
-
       tournamentStatus: "live",
       matchStatus: "live",
-
       roomId: verifiedMatch.room_id,
       roomPassword: verifiedMatch.room_password,
     });
   } catch (error) {
-    console.error("=================================");
     console.error("LIVE KEYS API ERROR:", error);
-    console.error("=================================");
 
     return NextResponse.json(
       {
