@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 type Match = {
   id: string;
@@ -410,6 +411,43 @@ export default function MyMatchesPage() {
 
   useEffect(() => {
     loadMatches();
+  }, []);
+
+  // ==========================================
+  // REALTIME LISTENER
+  // Admin LIVE KEYS -> My Matches updates instantly
+  // No polling / no 10-second refresh
+  // ==========================================
+  useEffect(() => {
+    const channel = supabase
+      .channel("my-matches-live-status")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "tournaments",
+        },
+        () => {
+          void loadMatches();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "matches",
+        },
+        () => {
+          void loadMatches();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
   }, []);
 
   async function refreshOnTabChange(nextTab: Tab) {

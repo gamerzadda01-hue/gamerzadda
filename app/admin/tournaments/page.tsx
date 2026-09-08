@@ -154,48 +154,75 @@ export default function TournamentsAdminPage() {
   }, []);
 
   async function makeKeysLive(tournamentId: string) {
-    const current = keys[tournamentId] || { roomId: "", roomPassword: "" };
-    if (!current.roomId.trim() || !current.roomPassword.trim()) {
+    const current = keys[tournamentId] || {
+      roomId: "",
+      roomPassword: "",
+    };
+
+    const roomId = current.roomId.trim();
+    const roomPassword = current.roomPassword.trim();
+
+    if (!roomId || !roomPassword) {
       alert("Enter Room ID and Room Password first.");
       return;
     }
 
     setLiveKeysSaving(tournamentId);
 
-    const { data: existing } = await supabase
-      .from("matches")
-      .select("id")
-      .eq("tournament_id", tournamentId)
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    let error = null;
-
-    if (existing?.id) {
-      const result = await supabase
-        .from("matches")
-        .update({ room_id: current.roomId.trim(), room_password: current.roomPassword.trim() })
-        .eq("id", existing.id);
-      error = result.error;
-    } else {
-      const result = await supabase.from("matches").insert({
-        tournament_id: tournamentId,
-        room_id: current.roomId.trim(),
-        room_password: current.roomPassword.trim(),
-        status: "upcoming",
+    try {
+      const response = await fetch("/api/admin/keys", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          tournamentId,
+          roomId,
+          roomPassword,
+        }),
       });
-      error = result.error;
-    }
 
-    setLiveKeysSaving(null);
-    if (error) {
-      alert(error.message);
-      return;
-    }
+      const result = await response.json().catch(() => null);
 
-    alert("LIVE KEYS sent to users successfully.");
-    await loadTournaments();
+      if (!response.ok || !result?.success) {
+        throw new Error(
+          result?.error || "Failed to send LIVE KEYS."
+        );
+      }
+
+      setTournaments((currentTournaments) =>
+        currentTournaments.map((tournament) =>
+          tournament.id === tournamentId
+            ? {
+                ...tournament,
+                status: "live",
+                room_id: roomId,
+                room_password: roomPassword,
+                updated_at: new Date().toISOString(),
+              }
+            : tournament
+        )
+      );
+
+      alert("LIVE KEYS sent to users successfully.");
+
+      setShowKeysPopup(false);
+      setKeysTournamentId(null);
+
+      await loadTournaments();
+    } catch (error) {
+      console.error("LIVE KEYS error:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to send LIVE KEYS."
+      );
+    } finally {
+      setLiveKeysSaving(null);
+    }
   }
 
   async function showParticipants(tournament: Tournament) {

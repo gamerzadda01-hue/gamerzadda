@@ -344,13 +344,7 @@ export default function FreeFirePage() {
       )
       .subscribe();
 
-    // Fallback in case Realtime is not enabled for these tables.
-    const timer = window.setInterval(() => {
-      setTournamentRefreshKey((prev) => prev + 1);
-    }, 10000);
-
     return () => {
-      window.clearInterval(timer);
       supabase.removeChannel(channel);
     };
   }, []);

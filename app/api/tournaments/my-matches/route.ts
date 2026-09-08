@@ -135,6 +135,42 @@ export async function GET() {
       );
     }
 
+    // Get ACTIVE PLAYER COUNT for each tournament
+    const {
+      data: playerRows,
+      error: playerCountError,
+    } = await supabaseAdmin
+      .from("tournament_entries")
+      .select("tournament_id")
+      .in("tournament_id", tournamentIds)
+      .eq("cancelled", false);
+
+    if (playerCountError) {
+      console.error(
+        "My matches player count error:",
+        playerCountError
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Failed to load player counts.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const playerCountByTournament = new Map<string, number>();
+
+    for (const row of playerRows || []) {
+      const tournamentId = String(row.tournament_id);
+
+      playerCountByTournament.set(
+        tournamentId,
+        (playerCountByTournament.get(tournamentId) || 0) + 1
+      );
+    }
+
     // Get LIVE/room information from matches table
     const {
       data: matchRows,
@@ -190,22 +226,28 @@ export async function GET() {
 
     const matches = (tournaments || [])
       .map((tournament) => {
-        const match = matchByTournament.get(
-          String(tournament.id)
-        );
+        const tournamentId = String(tournament.id);
+
+        const match = matchByTournament.get(tournamentId);
 
         const isLive =
           String(match?.status || "").toLowerCase() ===
           "live";
 
+        const joinedCount =
+          playerCountByTournament.get(tournamentId) || 0;
+
         return {
           ...tournament,
 
-          // Use LIVE status from matches table
-          // when admin has sent LIVE KEYS.
+          // LIVE status from matches table when admin sends LIVE KEYS.
           status: isLive
             ? "live"
             : tournament.status,
+
+          // CURRENT PLAYERS / JOINED PLAYERS
+          joined_count: joinedCount,
+          players: joinedCount,
 
           entry_fee: Number(
             tournament.entry_fee || 0
