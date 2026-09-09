@@ -56,6 +56,12 @@ export default function FreeFirePage() {
   const touchStartY = useRef<number | null>(null);
   const isSwiping = useRef(false);
 
+  // Show only the selected game mode.
+  const filteredTournaments = tournaments.filter((tournament) => {
+    const mode = String(tournament.mode ?? "").trim().toLowerCase();
+    return mode === activeTab.toLowerCase();
+  });
+
   // LOAD FREE FIRE BANNERS
   useEffect(() => {
     async function loadBanners() {
@@ -554,7 +560,7 @@ export default function FreeFirePage() {
           </h2>
 
           <span className="text-[8px] font-medium text-gray-500">
-            {tournaments.length} Matches
+            {filteredTournaments.length} Matches
           </span>
 
         </div>
@@ -626,12 +632,12 @@ export default function FreeFirePage() {
               RETRY
             </button>
           </div>
-        ) : tournaments.length === 0 ? (
+        ) : filteredTournaments.length === 0 ? (
           <div className="rounded-xl bg-white px-4 py-8 text-center text-xs font-bold text-gray-500">
             No upcoming tournaments available
           </div>
         ) : (
-          tournaments.map((tournament) => (
+          filteredTournaments.map((tournament) => (
             <TournamentCard
               key={tournament.id}
               tournament={tournament}

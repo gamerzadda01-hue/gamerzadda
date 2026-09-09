@@ -20,6 +20,13 @@ export default function TournamentPage() {
   const [joined, setJoined] = useState(false);
   const [slideValue, setSlideValue] = useState(0);
   const [joining, setJoining] = useState(false);
+  const [duoAction, setDuoAction] = useState<"create" | "join">("create");
+  const [teamName, setTeamName] = useState("");
+  const [teamCode, setTeamCode] = useState("");
+  const [duoLoading, setDuoLoading] = useState(false);
+  const [createdTeamCode, setCreatedTeamCode] = useState("");
+  const [showJoinedTeamCode, setShowJoinedTeamCode] = useState(false);
+  const [teamCodeCopied, setTeamCodeCopied] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelModal, setCancelModal] = useState<"notice" | "success" | "error" | null>(null);
   const [cancelModalMessage, setCancelModalMessage] = useState("");
@@ -98,6 +105,85 @@ export default function TournamentPage() {
     depositBalance + bonusBalance + winningBalance
   );
   const entryFee = Number(tournament?.entry_fee ?? 0);
+
+  // Duo UI must render ONLY for tournaments whose mode is exactly "Duo".
+  // Solo keeps the original Join Tournament UI.
+  const isDuoTournament =
+    String(tournament?.mode ?? "").trim().toLowerCase() === "duo";
+
+  const getDuoTeamStorageKey = (tournamentId: string) =>
+    `gamerzadda:duo-team-code:${String(tournamentId).trim()}`;
+
+  const saveDuoTeamCodeLocally = (tournamentId: string, code: string) => {
+    const cleanCode = String(code || "").trim();
+    if (!tournamentId || !/^\d{6}$/.test(cleanCode)) return;
+    try {
+      window.localStorage.setItem(getDuoTeamStorageKey(tournamentId), cleanCode);
+    } catch (error) {
+      console.warn("Unable to save Duo team code locally:", error);
+    }
+  };
+
+  const getDuoTeamCodeLocally = (tournamentId: string) => {
+    if (!tournamentId) return "";
+    try {
+      const code = String(
+        window.localStorage.getItem(getDuoTeamStorageKey(tournamentId)) || ""
+      ).trim();
+      return /^\d{6}$/.test(code) ? code : "";
+    } catch {
+      return "";
+    }
+  };
+
+  const removeDuoTeamCodeLocally = (tournamentId: string) => {
+    if (!tournamentId) return;
+    try {
+      window.localStorage.removeItem(getDuoTeamStorageKey(tournamentId));
+    } catch {
+      // Ignore storage errors.
+    }
+  };
+
+  const copyDuoTeamCode = async () => {
+    if (!createdTeamCode) return;
+    try {
+      await navigator.clipboard.writeText(createdTeamCode);
+      setTeamCodeCopied(true);
+      window.setTimeout(() => setTeamCodeCopied(false), 1800);
+    } catch {
+      setJoinError("Unable to copy team code. Please copy it manually.");
+    }
+  };
+
+  const shareDuoTeamOnWhatsApp = () => {
+    if (!createdTeamCode) return;
+
+    const tournamentTitle = String(tournament?.title || "GAMERZADDA Duo Tournament");
+    const message = [
+      "🎮 GAMERZADDA DUO TEAM INVITE",
+      "",
+      `🏆 Tournament: ${tournamentTitle}`,
+      `🔢 Team Code: ${createdTeamCode}`,
+      "",
+      "HOW TO JOIN:",
+      "1. Open GAMERZADDA",
+      "2. Open the same Duo tournament",
+      "3. Tap JOIN NOW",
+      "4. Select JOIN",
+      "5. Enter the 6-digit Team Code",
+      "6. Enter your IGN, UID and Level",
+      "7. Join the team — no entry fee is charged",
+      "",
+      "🔥 Join my team and let's win!",
+    ].join("\n");
+
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(message)}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  };
 
   const bonusUsablePercent = Math.min(
     100,
@@ -375,6 +461,10 @@ export default function TournamentPage() {
     setWalletOpen(false);
     setJoinError("");
     setSlideValue(0);
+    setDuoAction("create");
+    setTeamName("");
+    setTeamCode("");
+    setTeamCodeCopied(false);
 
     // Refresh the latest account-wise player details before showing the form.
     try {
@@ -519,6 +609,161 @@ export default function TournamentPage() {
     };
   }, [tournament?.id]);
 
+  // Recover the creator's active Duo team code from the database every time
+  // the tournament page loads. This makes the code persistent even if the
+  // user closed the popup or did not copy it when the team was created.
+  useEffect(() => {
+    let active = true;
+
+    async function loadMyDuoTeam() {
+      if (!tournament?.id || !isDuoTournament) return;
+
+      // Give the tournament state a moment to settle, then check the server.
+      // The server is the source of truth, so the popup also works after a
+      // refresh, browser restart, logout/login, or reopening the same page.
+      const tournamentId = String(tournament.id).trim();
+      if (!tournamentId) return;
+
+      // Restore immediately from browser storage so the Team Code is still
+      // visible after Next.js back/forward navigation even if the API is slow.
+      const locallySavedCode = getDuoTeamCodeLocally(tournamentId);
+      if (/^\d{6}$/.test(locallySavedCode)) {
+        setCreatedTeamCode(locallySavedCode);
+        setShowJoinedTeamCode(true);
+        setJoined(true);
+      }
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (!active) return;
+
+        try {
+          const response = await fetch(
+            `/api/tournaments/duo/my-team?tournamentId=${encodeURIComponent(tournamentId)}`,
+            {
+              method: "GET",
+              credentials: "include",
+              cache: "no-store",
+              headers: {
+                Accept: "application/json",
+              },
+            }
+          );
+
+          const result = await response.json().catch(() => null);
+          if (!active) return;
+
+          const recoveredTeamCode = String(
+            result?.teamCode ?? result?.team?.team_code ?? ""
+          ).trim();
+
+          if (response.ok && result?.success === true && /^\d{6}$/.test(recoveredTeamCode)) {
+            // IMPORTANT: creator already has an active Duo team.
+            // Open the team-code popup automatically on every page open.
+            setCreatedTeamCode(recoveredTeamCode);
+            saveDuoTeamCodeLocally(tournamentId, recoveredTeamCode);
+            setShowJoinedTeamCode(true);
+            setJoined(true);
+            setDuoAction("create");
+            setPopup("join");
+            setJoinError("");
+            setWalletOpen(false);
+            setTeamCodeCopied(false);
+            return;
+          }
+
+          // A valid server response with no team means this user is not the
+          // creator of a Duo team, so do not show the automatic popup.
+          if (response.ok && result?.success === true) {
+            // Do NOT wipe the locally saved code here. Some back/forward
+            // navigations can briefly return an empty team response before
+            // the authenticated session is fully restored.
+            const fallbackCode = getDuoTeamCodeLocally(tournamentId);
+            if (/^\d{6}$/.test(fallbackCode)) {
+              setCreatedTeamCode(fallbackCode);
+              setShowJoinedTeamCode(true);
+              setJoined(true);
+            }
+            return;
+          }
+        } catch (error) {
+          console.error(`My Duo team check (attempt ${attempt + 1}):`, error);
+        }
+
+        if (attempt < 2) {
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+        }
+      }
+    }
+
+    loadMyDuoTeam();
+
+    return () => {
+      active = false;
+    };
+  }, [tournament?.id, tournament?.mode, isDuoTournament]);
+
+  // Refresh the creator Team Code whenever this page becomes visible again.
+  // This handles browser back/forward navigation and cached pages (bfcache).
+  useEffect(() => {
+    const refreshMyDuoTeamCode = async () => {
+      if (!tournament?.id || !isDuoTournament) return;
+
+      try {
+        const tournamentId = String(tournament.id).trim();
+        if (!tournamentId) return;
+
+        const locallySavedCode = getDuoTeamCodeLocally(tournamentId);
+        if (/^\d{6}$/.test(locallySavedCode)) {
+          setCreatedTeamCode(locallySavedCode);
+          setShowJoinedTeamCode(true);
+          setJoined(true);
+        }
+
+        const response = await fetch(
+          `/api/tournaments/duo/my-team?tournamentId=${encodeURIComponent(tournamentId)}`,
+          {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+          }
+        );
+
+        const result = await response.json().catch(() => null);
+        const recoveredTeamCode = String(
+          result?.teamCode ?? result?.team?.team_code ?? ""
+        ).trim();
+
+        if (response.ok && result?.success === true && /^\d{6}$/.test(recoveredTeamCode)) {
+          setCreatedTeamCode(recoveredTeamCode);
+          saveDuoTeamCodeLocally(tournamentId, recoveredTeamCode);
+          setShowJoinedTeamCode(true);
+          setJoined(true);
+        }
+      } catch (error) {
+        console.error("Refresh Duo Team Code:", error);
+      }
+    };
+
+    const handlePageShow = () => {
+      void refreshMyDuoTeamCode();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshMyDuoTeamCode();
+      }
+    };
+
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [tournament?.id, isDuoTournament]);
+
   useEffect(() => {
     const timer = window.setInterval(() => setCancelTick(Date.now()), 30000);
     return () => window.clearInterval(timer);
@@ -631,6 +876,9 @@ export default function TournamentPage() {
       // Reset all local entry state so the same tournament can be joined again
       // without showing "Already Joined".
       setJoined(false);
+      removeDuoTeamCodeLocally(String(tournament.id));
+      setCreatedTeamCode("");
+      setTeamCodeCopied(false);
       setCurrentEntryId(null);
       setPendingCancelEntryId(null);
       setSlideValue(0);
@@ -688,6 +936,151 @@ export default function TournamentPage() {
       setCancelModal("error");
     } finally {
       setCancelling(false);
+    }
+  };
+
+  const handleDuoCreate = async () => {
+    if (!gameName.trim()) {
+      setJoinError("Please enter your In-Game Name.");
+      return;
+    }
+
+    if (!uid) {
+      setJoinError("Please enter your UID.");
+      return;
+    }
+
+    if (!level || Number(level) < 1 || Number(level) > 100) {
+      setJoinError("Level must be between 1 and 100.");
+      return;
+    }
+
+    if (!teamName.trim()) {
+      setJoinError("Please enter your team name.");
+      return;
+    }
+
+    if (walletLoading) {
+      setJoinError("Wallet is still loading. Please wait.");
+      return;
+    }
+
+    if (tournamentUsableBalance < entryFee) {
+      setInsufficientBalanceOpen(true);
+      return;
+    }
+
+    if (duoLoading || !tournament) return;
+
+    setDuoLoading(true);
+    setJoinError("");
+
+    try {
+      const response = await fetch("/api/tournaments/duo/create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tournamentId: tournament.id,
+          teamName: teamName.trim(),
+          gameName: gameName.trim(),
+          uid,
+          level: Number(level),
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (response.status === 402 || result?.code === "INSUFFICIENT_BALANCE") {
+        setInsufficientBalanceOpen(true);
+        return;
+      }
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to create Duo team.");
+      }
+
+      const newTeamCode = String(
+        result?.teamCode || result?.team?.team_code || ""
+      ).trim();
+      setCreatedTeamCode(newTeamCode);
+      if (/^\d{6}$/.test(newTeamCode)) {
+        saveDuoTeamCodeLocally(String(tournament.id), newTeamCode);
+      }
+      setShowJoinedTeamCode(true);
+      setWallet({
+        deposit_balance: Number(result.wallet?.deposit ?? 0),
+        bonus_balance: Number(result.wallet?.bonus ?? 0),
+        winning_balance: Number(result.wallet?.winning ?? 0),
+      });
+      setJoinedPlayers((count) => count + 1);
+      setJoined(true);
+    } catch (error) {
+      console.error("Duo team create:", error);
+      setJoinError(
+        error instanceof Error ? error.message : "Unable to create Duo team."
+      );
+    } finally {
+      setDuoLoading(false);
+    }
+  };
+
+  const handleDuoJoin = async () => {
+    if (!teamCode.trim() || !/^\d{6}$/.test(teamCode.trim())) {
+      setJoinError("Please enter a valid 6-digit team code.");
+      return;
+    }
+
+    if (!gameName.trim()) {
+      setJoinError("Please enter your In-Game Name.");
+      return;
+    }
+
+    if (!uid) {
+      setJoinError("Please enter your UID.");
+      return;
+    }
+
+    if (!level || Number(level) < 1 || Number(level) > 100) {
+      setJoinError("Level must be between 1 and 100.");
+      return;
+    }
+
+    if (duoLoading || !tournament) return;
+
+    setDuoLoading(true);
+    setJoinError("");
+
+    try {
+      const response = await fetch("/api/tournaments/duo/join", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tournamentId: tournament.id,
+          teamCode: teamCode.trim(),
+          gameName: gameName.trim(),
+          uid,
+          level: Number(level),
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to join Duo team.");
+      }
+
+      setJoinedPlayers((count) => count + 1);
+      setJoined(true);
+      setJoinError("");
+    } catch (error) {
+      console.error("Duo team join:", error);
+      setJoinError(
+        error instanceof Error ? error.message : "Unable to join Duo team."
+      );
+    } finally {
+      setDuoLoading(false);
     }
   };
 
@@ -777,11 +1170,34 @@ export default function TournamentPage() {
 
   if (pageLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f6f8] px-4">
-        <div className="rounded-2xl bg-white px-6 py-8 text-center shadow-sm">
-          <div className="text-lg font-black">Loading Tournament...</div>
-          <div className="mt-1 text-xs text-gray-400">Please wait</div>
-        </div>
+      <main className="min-h-screen bg-[#f5f6f8] pb-24 text-gray-900">
+        <header className="sticky top-0 z-40 bg-[#ff174f] px-4 py-2 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 animate-pulse rounded-2xl bg-white/30" />
+            <div className="h-5 w-36 animate-pulse rounded-lg bg-white/30" />
+          </div>
+        </header>
+        <section className="space-y-3 px-3 pt-3">
+          <div className="h-40 animate-pulse rounded-3xl bg-gray-200" />
+          <div className="rounded-3xl bg-white p-4 shadow-sm">
+            <div className="h-5 w-48 animate-pulse rounded bg-gray-200" />
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="h-16 animate-pulse rounded-2xl bg-gray-100" />
+              <div className="h-16 animate-pulse rounded-2xl bg-gray-100" />
+              <div className="h-16 animate-pulse rounded-2xl bg-gray-100" />
+              <div className="h-16 animate-pulse rounded-2xl bg-gray-100" />
+            </div>
+          </div>
+          <div className="rounded-3xl bg-white p-4 shadow-sm">
+            <div className="h-5 w-40 animate-pulse rounded bg-gray-200" />
+            <div className="mt-4 space-y-3">
+              <div className="h-12 animate-pulse rounded-2xl bg-gray-100" />
+              <div className="h-12 animate-pulse rounded-2xl bg-gray-100" />
+              <div className="h-12 animate-pulse rounded-2xl bg-gray-100" />
+            </div>
+          </div>
+          <div className="h-24 animate-pulse rounded-3xl bg-gray-200" />
+        </section>
       </main>
     );
   }
@@ -846,12 +1262,12 @@ export default function TournamentPage() {
     <main className="min-h-screen bg-[#f5f6f8] pb-24 text-gray-900">
 
       {/* HEADER */}
-      <header className="sticky top-0 z-40 bg-[#ff174f] px-4 py-4 text-white shadow-lg">
+      <header className="sticky top-0 z-40 bg-[#ff174f] px-4 py-2 text-white shadow-lg">
         <div className="flex items-center gap-3">
           <button 
             onClick={() => router.back()} 
             aria-label="Go back" 
-            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95" 
+            className="group flex h-9 w-9 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95" 
           > 
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100"> 
               <svg 
@@ -1035,6 +1451,49 @@ export default function TournamentPage() {
           </div>
         </div>
       </section>
+
+      {/* YOUR DUO TEAM CODE */}
+      {isDuoTournament && createdTeamCode && (
+        <section className="px-3 pt-5">
+          <div className="overflow-hidden rounded-2xl border-2 border-emerald-200 bg-emerald-50 shadow-sm">
+            <div className="px-4 py-4 text-center">
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-xl">
+                🔢
+              </div>
+
+              <p className="mt-2 text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600">
+                YOUR TEAM CODE
+              </p>
+
+              <p className="mt-1 text-3xl font-black tracking-[0.25em] text-emerald-700">
+                {createdTeamCode}
+              </p>
+
+              <p className="mt-1 text-[9px] font-semibold text-emerald-600">
+                Share this 6-digit code with your teammate.
+              </p>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={copyDuoTeamCode}
+                  className="rounded-xl bg-white px-3 py-2.5 text-[10px] font-black text-emerald-700 shadow-sm ring-1 ring-emerald-200 transition active:scale-[0.98]"
+                >
+                  {teamCodeCopied ? "✓ COPIED" : "COPY CODE"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={shareDuoTeamOnWhatsApp}
+                  className="rounded-xl bg-[#25D366] px-3 py-2.5 text-[10px] font-black text-white shadow-sm transition active:scale-[0.98]"
+                >
+                  WHATSAPP
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* PRIZE DISTRIBUTION */}
       <section className="px-3 pt-5">
@@ -1371,7 +1830,24 @@ export default function TournamentPage() {
             </div>
 
             <div className="max-h-[68vh] space-y-2.5 overflow-y-auto p-4">
-              {tournamentRules.map((rule, index) => (
+              {[
+                "YOU WILL GET ROOM ID & PASSWORD ON THE SAME MATCH TIME.",
+                "(EX. YOUR MATCH IS SCHEDULED AT 2PM, THEN YOU WILL GET ID & PASSWORD AT 2:00 PM AND THE MATCH WILL BE STARTED AT 2:10PM.)",
+                "YOU WILL GET ID & PASSWORD VIA GAMERZADDA NOTIFICATION.",
+                "TEAMUP NOT ALLOWED.",
+                "ALWAYS ON SCREEN RECORDING WHILE PLAYING GAMERZADDA MATCHES.",
+                "MONSTER TRUCK OR ANY VEHICLES ARE NOT ALLOWED IN SURVIVAL MATCHES.",
+                "HEADSHOT (%) SHOULD NOT BE MORE THAN 60 IN CAREER MODE.",
+                "MULTIPLE ACCOUNTS ARE NOT ALLOWED.",
+                "REFUND FOR PLAYERS WHO ARE KILLED BY HACKERS.",
+                "PLAYING MATCHES ON CALL IS NOT ALLOWED.",
+                "CUSTOM POV RECORDING IS MANDATORY.",
+                "THIRD PARTY APPLICATIONS ARE NOT ALLOWED.",
+                "PC PLAYERS ARE NOT ALLOWED.",
+                "INVITING UNREGISTERED PLAYERS ARE NOT ALLOWED.",
+                "DOUBLE VECTOR ARE NOT ALLOWED.",
+                "MINIMUM LEVEL SHOULD BE 25.",
+              ].map((rule, index) => (
                 <div
                   key={`${rule}-${index}`}
                   className="flex gap-3 rounded-2xl border border-gray-100 bg-gray-50 p-3"
@@ -1454,7 +1930,8 @@ export default function TournamentPage() {
               {popup === "join" && (
                 <div className="space-y-2">
 
-                  {joined ? (
+                  {isDuoTournament ? (
+                    (joined || showJoinedTeamCode) ? (
                     <div className="py-2 text-center">
                       <div className="relative mx-auto mb-4 flex h-20 w-20 items-center justify-center">
                         <div className="absolute inset-0 rounded-full bg-emerald-400/20 blur-xl" />
@@ -1471,6 +1948,37 @@ export default function TournamentPage() {
                       <p className="mt-1 text-xs font-semibold text-gray-500">
                         Your entry has been confirmed successfully.
                       </p>
+
+
+                      {isDuoTournament && createdTeamCode && (
+                        <div className="mt-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4 text-center">
+                          <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600">
+                            TEAM CODE
+                          </p>
+                          <p className="mt-1 text-3xl font-black tracking-[0.25em] text-emerald-700">
+                            {createdTeamCode}
+                          </p>
+                          <p className="mt-1 text-[9px] font-semibold text-emerald-600">
+                            Share this 6-digit code with your teammate.
+                          </p>
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={copyDuoTeamCode}
+                              className="rounded-xl bg-white px-3 py-2.5 text-[10px] font-black text-emerald-700 shadow-sm ring-1 ring-emerald-200 active:scale-[0.98]"
+                            >
+                              {teamCodeCopied ? "✓ COPIED" : "COPY CODE"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={shareDuoTeamOnWhatsApp}
+                              className="rounded-xl bg-[#25D366] px-3 py-2.5 text-[10px] font-black text-white shadow-sm active:scale-[0.98]"
+                            >
+                              WHATSAPP
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="mt-5 overflow-hidden rounded-2xl border border-gray-100 bg-white text-left shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
                         <div className="flex items-center justify-between border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-green-50 px-4 py-3">
@@ -1506,6 +2014,232 @@ export default function TournamentPage() {
                       </div>
                     </div>
                   ) : (
+                    <>
+                      {/* DUO ACTION */}
+                      <div className="grid grid-cols-2 gap-2 rounded-xl bg-gray-100 p-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDuoAction("create");
+                            setJoinError("");
+                          }}
+                          className={`rounded-lg py-2 text-[10px] font-black transition ${
+                            duoAction === "create"
+                              ? "bg-[#ff174f] text-white shadow-sm"
+                              : "text-gray-500"
+                          }`}
+                        >
+                          CREATE
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDuoAction("join");
+                            setJoinError("");
+                          }}
+                          className={`rounded-lg py-2 text-[10px] font-black transition ${
+                            duoAction === "join"
+                              ? "bg-[#ff174f] text-white shadow-sm"
+                              : "text-gray-500"
+                          }`}
+                        >
+                          JOIN
+                        </button>
+                      </div>
+
+                      {duoAction === "create" ? (
+                        <>
+                          <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                            <p className="text-[10px] font-black text-emerald-700">
+                              CREATE DUO TEAM
+                            </p>
+                            <p className="mt-0.5 text-[8px] font-semibold text-emerald-600">
+                              Pay one entry fee and invite your teammate with the 6-digit code.
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="mb-0.5 text-xs font-medium text-gray-700">👥 TEAM NAME</p>
+                            <input
+                              type="text"
+                              value={teamName}
+                              maxLength={20}
+                              autoComplete="off"
+                              placeholder="Enter team name"
+                              onChange={(e) => {
+                                setTeamName(
+                                  e.target.value.replace(/[^a-zA-Z0-9 ]/g, "").slice(0, 20)
+                                );
+                                setJoinError("");
+                              }}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                            />
+                          </div>
+
+                          {/* IN-GAME NAME */}
+                          <div>
+                            <div className="mb-0.5 flex items-center justify-between">
+                              <p className="text-xs font-medium text-gray-700">🎮 IN-GAME NAME</p>
+                              <span className="text-xs font-medium text-gray-400">{gameName.length}/20</span>
+                            </div>
+                            <input
+                              type="text"
+                              value={gameName}
+                              maxLength={20}
+                              autoComplete="off"
+                              placeholder="Enter your in-game name"
+                              onChange={(e) => handleGameNameChange(e.target.value)}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold uppercase outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                            />
+                          </div>
+
+                          {/* UID */}
+                          <div>
+                            <p className="mb-0.5 text-xs font-medium text-gray-700">🆔 UID</p>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={uid}
+                              maxLength={15}
+                              autoComplete="off"
+                              placeholder="Enter Free Fire UID"
+                              onChange={(e) => handleUidChange(e.target.value)}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                            />
+                          </div>
+
+                          {/* LEVEL */}
+                          <div>
+                            <p className="mb-0.5 text-xs font-medium text-gray-700">⭐ LEVEL</p>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              max={100}
+                              value={level}
+                              placeholder="Enter your level (1-100)"
+                              onChange={(e) => handleLevelChange(e.target.value)}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                            />
+                          </div>
+
+                          {createdTeamCode && (
+                            <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4 text-center">
+                              <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600">
+                                TEAM CODE
+                              </p>
+                              <p className="mt-1 text-3xl font-black tracking-[0.25em] text-emerald-700">
+                                {createdTeamCode}
+                              </p>
+                              <p className="mt-1 text-[9px] font-semibold text-emerald-600">
+                                Share this 6-digit code with your teammate.
+                              </p>
+
+                              <button
+                                type="button"
+                                onClick={copyDuoTeamCode}
+                                className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-white px-4 py-2.5 text-xs font-black text-emerald-700 shadow-sm ring-1 ring-emerald-200 transition active:scale-[0.98]"
+                              >
+                                {teamCodeCopied ? "✓ TEAM CODE COPIED" : "COPY TEAM CODE"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={shareDuoTeamOnWhatsApp}
+                                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-2.5 text-xs font-black text-white shadow-sm transition active:scale-[0.98] hover:brightness-95"
+                              >
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  className="h-4 w-4"
+                                  fill="currentColor"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M20.52 3.48A11.86 11.86 0 0 0 12.08 0C5.52 0 .18 5.34.18 11.9c0 2.1.55 4.15 1.59 5.96L.08 24l6.28-1.65a11.88 11.88 0 0 0 5.71 1.46h.01c6.55 0 11.89-5.34 11.89-11.9 0-3.18-1.24-6.17-3.45-8.43ZM12.08 21.8h-.01a9.88 9.88 0 0 1-5.03-1.38l-.36-.21-3.73.98.99-3.64-.23-.37a9.89 9.89 0 0 1-1.52-5.28C2.19 6.44 6.63 2 12.08 2c2.64 0 5.12 1.03 6.98 2.9a9.84 9.84 0 0 1 2.91 7c0 5.45-4.44 9.9-9.89 9.9Zm5.42-7.42c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.25-.46-2.38-1.46-.88-.78-1.47-1.74-1.64-2.03-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.09 4.49.71.31 1.26.49 1.69.63.71.23 1.35.2 1.86.12.57-.09 1.77-.72 2.02-1.42.25-.7.25-1.3.17-1.42-.07-.12-.27-.2-.57-.35Z" />
+                                </svg>
+                                SHARE ON WHATSAPP
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
+                            <p className="text-[10px] font-black text-blue-700">JOIN DUO TEAM</p>
+                            <p className="mt-0.5 text-[8px] font-semibold text-blue-600">
+                              Enter your teammate's 6-digit team code. No entry fee is charged.
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="mb-0.5 text-xs font-medium text-gray-700">🔢 TEAM CODE</p>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={teamCode}
+                              maxLength={6}
+                              autoComplete="off"
+                              placeholder="Enter 6-digit team code"
+                              onChange={(e) => {
+                                setTeamCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                                setJoinError("");
+                              }}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-center text-lg font-black tracking-[0.2em] outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                            />
+                          </div>
+
+                          <div>
+                            <p className="mb-0.5 text-xs font-medium text-gray-700">🎮 IN-GAME NAME</p>
+                            <input
+                              type="text"
+                              value={gameName}
+                              maxLength={20}
+                              autoComplete="off"
+                              placeholder="Enter your in-game name"
+                              onChange={(e) => handleGameNameChange(e.target.value)}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold uppercase outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                            />
+                          </div>
+
+                          <div>
+                            <p className="mb-0.5 text-xs font-medium text-gray-700">🆔 UID</p>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={uid}
+                              maxLength={15}
+                              autoComplete="off"
+                              placeholder="Enter Free Fire UID"
+                              onChange={(e) => handleUidChange(e.target.value)}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                            />
+                          </div>
+
+                          <div>
+                            <p className="mb-0.5 text-xs font-medium text-gray-700">⭐ LEVEL</p>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              max={100}
+                              value={level}
+                              placeholder="Enter your level (1-100)"
+                              onChange={(e) => handleLevelChange(e.target.value)}
+                              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {joinError && (
+                        <div
+                          role="alert"
+                          className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-600"
+                        >
+                          ⚠️ {joinError}
+                        </div>
+                      )}
+                    </>
+                  )) : (
                     <>
                       {/* IN-GAME NAME */}
                       <div>
@@ -1690,7 +2424,6 @@ export default function TournamentPage() {
                       )}
                     </>
                   )}
-
                 </div>
               )}
 
@@ -1705,6 +2438,19 @@ export default function TournamentPage() {
                     className="w-full rounded-xl bg-gradient-to-r from-green-600 to-green-500 py-3.5 text-sm font-black text-white shadow-lg shadow-green-200"
                   >
                     ✓ DONE
+                  </button>
+                ) : isDuoTournament ? (
+                  <button
+                    type="button"
+                    onClick={duoAction === "create" ? handleDuoCreate : handleDuoJoin}
+                    disabled={duoLoading}
+                    className="w-full rounded-xl bg-[#ff174f] py-3.5 text-sm font-black text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {duoLoading
+                      ? "PROCESSING..."
+                      : duoAction === "create"
+                        ? `CREATE TEAM • ₹${entryFee}`
+                        : "JOIN TEAM • FREE"}
                   </button>
                 ) : (
                   <div className="w-full">
