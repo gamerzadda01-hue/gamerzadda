@@ -23,6 +23,7 @@ type Match = {
   room_id: string | null;
   room_password: string | null;
   match_start_time: string | null;
+  match_status: string | null;
 };
 
 type Tab = "upcoming" | "live" | "past";
@@ -44,22 +45,51 @@ function formatDate(value: string | null) {
 }
 
 function getCategory(match: Match): Tab {
-  const status = String(match.status || "").toLowerCase();
+  const tournamentStatus = String(match.status || "")
+    .trim()
+    .toLowerCase();
 
+  const matchStatus = String(match.match_status || "")
+    .trim()
+    .toLowerCase();
+
+  // Admin controls the actual match status from the match/room section.
   if (
-    status === "completed" ||
-    status === "complete" ||
-    status === "finished" ||
-    status === "cancelled" ||
-    status === "canceled"
+    matchStatus === "completed" ||
+    matchStatus === "complete" ||
+    matchStatus === "finished" ||
+    matchStatus === "ended" ||
+    matchStatus === "closed" ||
+    matchStatus === "cancelled" ||
+    matchStatus === "canceled"
   ) {
     return "past";
   }
 
   if (
-    status === "live" ||
-    status === "ongoing" ||
-    status === "started"
+    tournamentStatus === "completed" ||
+    tournamentStatus === "complete" ||
+    tournamentStatus === "finished" ||
+    tournamentStatus === "ended" ||
+    tournamentStatus === "closed" ||
+    tournamentStatus === "cancelled" ||
+    tournamentStatus === "canceled"
+  ) {
+    return "past";
+  }
+
+  if (
+    matchStatus === "live" ||
+    matchStatus === "ongoing" ||
+    matchStatus === "started"
+  ) {
+    return "live";
+  }
+
+  if (
+    tournamentStatus === "live" ||
+    tournamentStatus === "ongoing" ||
+    tournamentStatus === "started"
   ) {
     return "live";
   }
@@ -72,7 +102,10 @@ function getCategory(match: Match): Tab {
     ? new Date(match.match_start_time).getTime()
     : NaN;
 
-  if (Number.isFinite(matchTime) && Date.now() >= matchTime) {
+  if (
+    Number.isFinite(matchTime) &&
+    Date.now() >= matchTime
+  ) {
     return "live";
   }
 
@@ -214,6 +247,16 @@ function TournamentCard({
         >
           🔑 CLICK TO VIEW CUSTOM ROOM ID PASS
         </button>
+      ) : category === "past" ? (
+        <Link
+          href={`/freefire/tournament/mymatches/results/${tournament.id}`}
+          className="flex h-7 w-full items-center justify-center gap-2 bg-[#ff174f] px-2 text-[9px] font-black tracking-wide text-white transition active:scale-[0.99]"
+        >
+          🏆 MATCH COMPLETED
+          <span className="font-bold text-white/90">
+            Tap to view results →
+          </span>
+        </Link>
       ) : (
         <div className="grid grid-cols-2 gap-1">
           <Link
@@ -534,14 +577,14 @@ export default function MyMatchesPage() {
       <div className="mx-auto min-h-screen w-full max-w-md bg-[#f5f5f5]">
 
         {/* HEADER */}
-        <header className="sticky top-0 z-40 border-b border-gray-200 bg-white px-4 py-4 shadow-sm">
+        <header className="sticky top-0 z-40 border-b border-red-600 bg-[#ff174f] px-4 py-2 text-white shadow-sm">
           <div className="flex items-center gap-3">
             <button
               onClick={() => router.back()}
               aria-label="Go back"
-              className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
+              className="group flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-100 bg-white text-slate-700 shadow-sm transition active:scale-95"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 transition group-hover:bg-emerald-100">
                 <svg
                   viewBox="0 0 24 24"
                   className="h-5 w-5"
@@ -557,11 +600,11 @@ export default function MyMatchesPage() {
             </button>
 
             <div className="min-w-0">
-              <h1 className="text-lg font-black tracking-tight">
+              <h1 className="text-lg font-black tracking-tight text-white">
                 MY MATCHES
               </h1>
 
-              <p className="text-[10px] font-bold text-gray-500">
+              <p className="text-[10px] font-bold text-white/80">
                 Your joined tournaments
               </p>
             </div>

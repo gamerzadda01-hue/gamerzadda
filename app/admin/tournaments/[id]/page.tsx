@@ -559,6 +559,20 @@ export default function TournamentManagePage() {
       return;
     }
 
+    // A successfully saved result completes the match automatically.
+    const { error: matchStatusError } = await supabase
+      .from("matches")
+      .update({ status: "completed" })
+      .eq("id", match.id);
+
+    if (matchStatusError) {
+      setSavingResult(false);
+      alert("Result saved, but match could not be marked completed: " + matchStatusError.message);
+      return;
+    }
+
+    setMatchStatus("completed");
+
     if (data) {
       setResults((prev) =>
         [...prev.filter((result) => result.id !== data!.id), data].sort(

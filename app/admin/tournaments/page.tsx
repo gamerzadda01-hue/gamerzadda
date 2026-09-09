@@ -949,6 +949,13 @@ export default function TournamentsAdminPage() {
                   👥 PARTICIPANTS
                 </button>
                 <button
+                  type="button"
+                  className="action green"
+                  onClick={() => router.push(`/admin/tournaments/${tournament.id}/results`)}
+                >
+                  🏆 RESULTS
+                </button>
+                <button
                   className={`action ${tournament.status === "disabled" ? "green" : "yellow"}`}
                   onClick={() => toggleStatus(tournament)}
                 >

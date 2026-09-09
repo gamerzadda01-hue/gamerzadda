@@ -10,15 +10,20 @@ const SESSION_COOKIE = "gamerzadda_session";
 
 async function getUserFromSession() {
   const cookieStore = await cookies();
+
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
-  if (!token) return null;
+  if (!token) {
+    return null;
+  }
 
   let sessionToken = token;
 
   try {
     sessionToken = decodeURIComponent(token);
-  } catch {}
+  } catch {
+    // Keep original token if decoding fails
+  }
 
   const tokenHash = crypto
     .createHash("sha256")
@@ -31,7 +36,9 @@ async function getUserFromSession() {
     .eq("token_hash", tokenHash)
     .maybeSingle();
 
-  if (error || !session?.user_id) return null;
+  if (error || !session?.user_id) {
+    return null;
+  }
 
   if (
     session.expires_at &&
@@ -62,20 +69,16 @@ export async function GET() {
       );
     }
 
-    // Get tournaments joined by current user
-    // tournament_entries does NOT have created_at.
-    const { data: entries, error: entriesError } =
-      await supabaseAdmin
-        .from("tournament_entries")
-        .select("tournament_id")
-        .eq("user_id", userId)
-        .eq("cancelled", false);
+    // Get tournaments joined by this user
+    // NOTE: tournament_entries does NOT have created_at
+    const { data: entries, error: entriesError } = await supabaseAdmin
+      .from("tournament_entries")
+      .select("tournament_id")
+      .eq("user_id", userId)
+      .eq("cancelled", false);
 
     if (entriesError) {
-      console.error(
-        "My matches entries error:",
-        entriesError
-      );
+      console.error("My matches entries error:", entriesError);
 
       return NextResponse.json(
         {
@@ -86,7 +89,7 @@ export async function GET() {
       );
     }
 
-    if (!entries || entries.length === 0) {
+    if (!entries?.length) {
       return NextResponse.json({
         success: true,
         matches: [],
@@ -98,27 +101,25 @@ export async function GET() {
         entries
           .map((entry) => entry.tournament_id)
           .filter(Boolean)
-          .map((id) => String(id))
+          .map(String)
       ),
     ];
 
-    if (tournamentIds.length === 0) {
+    if (!tournamentIds.length) {
       return NextResponse.json({
         success: true,
         matches: [],
       });
     }
 
-    // Get tournament details
-    const {
-      data: tournaments,
-      error: tournamentsError,
-    } = await supabaseAdmin
-      .from("tournaments")
-      .select(
-        "id,title,game,mode,entry_fee,prize_pool,kill_reward,max_players,start_time,map,status"
-      )
-      .in("id", tournamentIds);
+    // Get tournament information
+    const { data: tournaments, error: tournamentsError } =
+      await supabaseAdmin
+        .from("tournaments")
+        .select(
+          "id,title,game,mode,entry_fee,prize_pool,kill_reward,max_players,start_time,map,status"
+        )
+        .in("id", tournamentIds);
 
     if (tournamentsError) {
       console.error(
@@ -135,34 +136,72 @@ export async function GET() {
       );
     }
 
-    // Get ACTIVE PLAYER COUNT for each tournament
-    const {
-      data: playerRows,
-      error: playerCountError,
-    } = await supabaseAdmin
-      .from("tournament_entries")
-      .select("tournament_id")
+    // Get latest match for every tournament
+    // IMPORTANT: match status is taken from matches.status
+    const { data: matchRows, error: matchError } = await supabaseAdmin
+      .from("matches")
+      .select(
+        "id,tournament_id,room_id,room_password,start_time,status"
+      )
       .in("tournament_id", tournamentIds)
-      .eq("cancelled", false);
+      .order("id", { ascending: false });
 
-    if (playerCountError) {
+    if (matchError) {
       console.error(
-        "My matches player count error:",
-        playerCountError
+        "My matches match data error:",
+        matchError
       );
+    }
 
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Failed to load player counts.",
-        },
-        { status: 500 }
+    const matchByTournament = new Map<
+      string,
+      {
+        room_ready: boolean;
+        room_id: string | null;
+        room_password: string | null;
+        match_start_time: string | null;
+        match_status: string | null;
+      }
+    >();
+
+    for (const row of matchRows || []) {
+      const tournamentId = String(row.tournament_id);
+
+      // Only keep latest match for each tournament
+      if (matchByTournament.has(tournamentId)) {
+        continue;
+      }
+
+      const roomId = String(row.room_id || "").trim();
+      const roomPassword = String(row.room_password || "").trim();
+
+      matchByTournament.set(tournamentId, {
+        room_ready: Boolean(roomId && roomPassword),
+        room_id: row.room_id || null,
+        room_password: row.room_password || null,
+        match_start_time: row.start_time || null,
+        match_status: row.status || null,
+      });
+    }
+
+    // Count active participants in each tournament
+    const { data: activeEntries, error: activeEntriesError } =
+      await supabaseAdmin
+        .from("tournament_entries")
+        .select("tournament_id")
+        .in("tournament_id", tournamentIds)
+        .eq("cancelled", false);
+
+    if (activeEntriesError) {
+      console.error(
+        "My matches participant count error:",
+        activeEntriesError
       );
     }
 
     const playerCountByTournament = new Map<string, number>();
 
-    for (const row of playerRows || []) {
+    for (const row of activeEntries || []) {
       const tournamentId = String(row.tournament_id);
 
       playerCountByTournament.set(
@@ -171,115 +210,40 @@ export async function GET() {
       );
     }
 
-    // Get LIVE/room information from matches table
-    const {
-      data: matchRows,
-      error: matchError,
-    } = await supabaseAdmin
-      .from("matches")
-      .select(
-        "id,tournament_id,room_id,room_password,status"
-      )
-      .in("tournament_id", tournamentIds)
-      .order("id", { ascending: false });
-
-    if (matchError) {
-      console.error(
-        "My matches room error:",
-        matchError
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Failed to load match information.",
-        },
-        { status: 500 }
-      );
-    }
-
-    // Keep latest match row for each tournament
-    const matchByTournament = new Map<
-      string,
-      {
-        id: string | number;
-        tournament_id: string;
-        room_id: string | null;
-        room_password: string | null;
-        status: string | null;
-      }
-    >();
-
-    for (const match of matchRows || []) {
-      const tournamentId = String(match.tournament_id);
-
-      if (!matchByTournament.has(tournamentId)) {
-        matchByTournament.set(tournamentId, {
-          id: match.id,
-          tournament_id: tournamentId,
-          room_id: match.room_id ?? null,
-          room_password: match.room_password ?? null,
-          status: match.status ?? null,
-        });
-      }
-    }
-
+    // Final response
     const matches = (tournaments || [])
       .map((tournament) => {
         const tournamentId = String(tournament.id);
 
         const match = matchByTournament.get(tournamentId);
 
-        const isLive =
-          String(match?.status || "").toLowerCase() ===
-          "live";
-
-        const joinedCount =
-          playerCountByTournament.get(tournamentId) || 0;
-
         return {
           ...tournament,
 
-          // LIVE status from matches table when admin sends LIVE KEYS.
-          status: isLive
-            ? "live"
-            : tournament.status,
+          entry_fee: Number(tournament.entry_fee || 0),
+          prize_pool: Number(tournament.prize_pool || 0),
+          kill_reward: Number(tournament.kill_reward || 0),
+          max_players: Number(tournament.max_players || 0),
 
-          // CURRENT PLAYERS / JOINED PLAYERS
-          joined_count: joinedCount,
-          players: joinedCount,
+          joined_at: null,
 
-          entry_fee: Number(
-            tournament.entry_fee || 0
-          ),
+          joined_count:
+            playerCountByTournament.get(tournamentId) || 0,
 
-          prize_pool: Number(
-            tournament.prize_pool || 0
-          ),
+          room_ready: match?.room_ready || false,
 
-          kill_reward: Number(
-            tournament.kill_reward || 0
-          ),
+          room_id: match?.room_id || null,
 
-          max_players: Number(
-            tournament.max_players || 0
-          ),
+          room_password: match?.room_password || null,
 
-          // Room information
-          room_id: isLive
-            ? match?.room_id || null
-            : null,
+          match_start_time:
+            match?.match_start_time ||
+            tournament.start_time ||
+            null,
 
-          room_password: isLive
-            ? match?.room_password || null
-            : null,
-
-          room_ready:
-            isLive &&
-            Boolean(
-              match?.room_id &&
-              match?.room_password
-            ),
+          // IMPORTANT:
+          // Frontend uses this to decide LIVE / PAST
+          match_status: match?.match_status || null,
         };
       })
       .sort((a, b) => {
@@ -299,10 +263,7 @@ export async function GET() {
       matches,
     });
   } catch (error) {
-    console.error(
-      "My Matches API error:",
-      error
-    );
+    console.error("My Matches API error:", error);
 
     return NextResponse.json(
       {

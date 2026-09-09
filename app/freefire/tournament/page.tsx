@@ -361,16 +361,15 @@ export default function FreeFirePage() {
     <main className="min-h-screen bg-[#f4f4f4] pb-20 text-black">
 
       {/* HEADER */}
-      <header className="sticky top-0 z-50 bg-[#ff174f] px-4 py-3 text-white shadow-md">
-
-        <div className="flex items-center justify-between">
+      <header className="sticky top-0 z-50 bg-[#ff174f] px-4 py-1 text-white shadow-md">
+        <div className="relative flex h-8 items-center justify-center">
 
           <button
             onClick={() => router.back()}
             aria-label="Go back"
-            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-red-500 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
+            className="absolute left-0 group flex h-9 w-9 items-center justify-center rounded-xl border border-red-500 bg-white text-slate-700 shadow-sm transition active:scale-95"
           >
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 transition group-hover:bg-emerald-100">
               <svg
                 viewBox="0 0 24 24"
                 className="h-5 w-5"
@@ -385,19 +384,9 @@ export default function FreeFirePage() {
             </span>
           </button>
 
-          <div className="text-center">
-            <h1 className="text-lg font-black tracking-wide">
-              FREE FIRE
-            </h1>
-
-            <p className="text-[9px] font-bold tracking-widest">
-              TOURNAMENTS
-            </p>
-          </div>
-
-          <div className="rounded-full bg-white/20 px-3 py-1.5 text-xs font-black">
-            ₹0
-          </div>
+          <h1 className="text-lg font-black tracking-wide">
+            FREE FIRE
+          </h1>
 
         </div>
       </header>
@@ -571,8 +560,55 @@ export default function FreeFirePage() {
         </div>
 
         {tournamentsLoading ? (
-          <div className="rounded-xl bg-white px-4 py-8 text-center text-xs font-bold text-gray-500">
-            Loading tournaments...
+          <div className="space-y-3">
+            {[1, 2, 3].map((item) => (
+              <div
+                key={item}
+                className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+              >
+                <div className="animate-pulse">
+                  <div className="flex gap-2 px-2 pt-2 pb-2">
+                    <div className="h-10 w-10 shrink-0 rounded-lg bg-gray-200" />
+                    <div className="min-w-0 flex-1 space-y-2 pt-1">
+                      <div className="h-3 w-3/5 rounded bg-gray-200" />
+                      <div className="h-2 w-full rounded bg-gray-100" />
+                      <div className="h-2 w-4/5 rounded bg-gray-100" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 border-y border-gray-100">
+                    <div className="space-y-2 px-2 py-2">
+                      <div className="mx-auto h-2 w-12 rounded bg-gray-100" />
+                      <div className="mx-auto h-3 w-14 rounded bg-gray-200" />
+                    </div>
+                    <div className="space-y-2 px-2 py-2">
+                      <div className="mx-auto h-2 w-12 rounded bg-gray-100" />
+                      <div className="mx-auto h-3 w-14 rounded bg-gray-200" />
+                    </div>
+                    <div className="space-y-2 px-2 py-2">
+                      <div className="mx-auto h-2 w-12 rounded bg-gray-100" />
+                      <div className="mx-auto h-3 w-14 rounded bg-gray-200" />
+                    </div>
+                  </div>
+
+                  <div className="px-2 pt-2">
+                    <div className="mb-1 flex justify-between">
+                      <div className="h-2 w-16 rounded bg-gray-100" />
+                      <div className="h-2 w-10 rounded bg-gray-100" />
+                    </div>
+                    <div className="h-1 rounded-full bg-gray-100" />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1 p-2">
+                    <div className="h-8 rounded-lg bg-gray-100" />
+                    <div className="h-8 rounded-lg bg-gray-100" />
+                    <div className="h-8 rounded-lg bg-gray-100" />
+                  </div>
+
+                  <div className="h-9 bg-gray-200" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : tournamentError ? (
           <div className="rounded-xl border border-red-200 bg-white px-4 py-6 text-center">
