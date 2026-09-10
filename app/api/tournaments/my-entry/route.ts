@@ -67,7 +67,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Only ACTIVE entry means user is currently joined.
+    // Only an ACTIVE entry means the user is currently joined.
+    // Cancelled entries are deliberately ignored.
     const { data: entry, error } = await supabaseAdmin
       .from("tournament_entries")
       .select("id,user_id,cancelled")

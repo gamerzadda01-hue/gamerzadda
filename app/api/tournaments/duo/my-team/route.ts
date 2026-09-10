@@ -42,10 +42,7 @@ export async function GET(request: Request) {
 
     if (!userId) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Unauthorized",
-        },
+        { success: false, error: "Unauthorized" },
         { status: 401 }
       );
     }
@@ -57,15 +54,44 @@ export async function GET(request: Request) {
 
     if (!tournamentId) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Tournament ID is required.",
-        },
+        { success: false, error: "Tournament ID is required." },
         { status: 400 }
       );
     }
 
-    // Find the active Duo team created by this user
+    // IMPORTANT:
+    // A Duo team is active only when the creator still has
+    // an active tournament entry. This prevents a cancelled
+    // entry from showing the old Team Code again.
+    const { data: entry, error: entryError } = await supabaseAdmin
+      .from("tournament_entries")
+      .select("id")
+      .eq("tournament_id", tournamentId)
+      .eq("user_id", userId)
+      .eq("cancelled", false)
+      .maybeSingle();
+
+    if (entryError) {
+      console.error("Duo my-team entry check error:", entryError);
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Unable to verify your tournament entry.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // No active tournament entry = no active Duo team.
+    if (!entry) {
+      return NextResponse.json({
+        success: true,
+        teamCode: null,
+        team: null,
+      });
+    }
+
     const { data: team, error: teamError } = await supabaseAdmin
       .from("duo_teams")
       .select("*")
@@ -86,7 +112,6 @@ export async function GET(request: Request) {
       );
     }
 
-    // User has no active Duo team in this tournament
     if (!team) {
       return NextResponse.json({
         success: true,

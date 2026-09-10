@@ -498,6 +498,34 @@ export async function POST(request: NextRequest) {
     }
 
     // ---------------------------------------------------------
+    // CANCEL CREATOR'S DUO TEAM
+    // ---------------------------------------------------------
+    // A cancelled tournament entry must never leave an active
+    // Duo team behind. This also protects against an old Team
+    // Code being restored after a page refresh.
+    const {
+      error: duoCancelError,
+    } = await supabaseAdmin
+      .from("duo_teams")
+      .update({
+        status: "cancelled",
+      })
+      .eq("tournament_id", tournamentId)
+      .eq("creator_user_id", userId)
+      .neq("status", "cancelled");
+
+    if (duoCancelError) {
+      console.error(
+        "Duo team cancellation failed:",
+        duoCancelError
+      );
+
+      // Do not undo the already-completed tournament cancellation.
+      // The my-team API also checks the active tournament entry, so
+      // the cancelled user cannot recover the old Team Code.
+    }
+
+    // ---------------------------------------------------------
     // REFUND TRANSACTION HISTORY
     // ---------------------------------------------------------
 

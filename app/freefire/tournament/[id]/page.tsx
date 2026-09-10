@@ -671,20 +671,14 @@ export default function TournamentPage() {
             return;
           }
 
-          // A valid server response with no team means this user is not the
-          // creator of a Duo team, so do not show the automatic popup.
-          if (response.ok && result?.success === true) {
-            // Do NOT wipe the locally saved code here. Some back/forward
-            // navigations can briefly return an empty team response before
-            // the authenticated session is fully restored.
-            const fallbackCode = getDuoTeamCodeLocally(tournamentId);
-            if (/^\d{6}$/.test(fallbackCode)) {
-              setCreatedTeamCode(fallbackCode);
-              setShowJoinedTeamCode(true);
-              setJoined(true);
-            }
-            return;
-          }
+          // Server confirms there is no active Duo team.
+          // Clear stale local state so CANCEL returns to JOIN NOW.
+          removeDuoTeamCodeLocally(tournamentId);
+          setCreatedTeamCode("");
+          setShowJoinedTeamCode(false);
+          setJoined(false);
+          setCurrentEntryId(null);
+          return;
         } catch (error) {
           console.error(`My Duo team check (attempt ${attempt + 1}):`, error);
         }
@@ -739,6 +733,12 @@ export default function TournamentPage() {
           saveDuoTeamCodeLocally(tournamentId, recoveredTeamCode);
           setShowJoinedTeamCode(true);
           setJoined(true);
+        } else if (response.ok && result?.success === true) {
+          removeDuoTeamCodeLocally(tournamentId);
+          setCreatedTeamCode("");
+          setShowJoinedTeamCode(false);
+          setJoined(false);
+          setCurrentEntryId(null);
         }
       } catch (error) {
         console.error("Refresh Duo Team Code:", error);
