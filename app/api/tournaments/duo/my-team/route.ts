@@ -96,8 +96,10 @@ export async function GET(request: Request) {
       .from("duo_teams")
       .select("*")
       .eq("tournament_id", tournamentId)
-      .eq("creator_user_id", userId)
       .neq("status", "cancelled")
+      .or(`creator_user_id.eq.${userId},member_user_id.eq.${userId}`)
+      .order("id", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (teamError) {

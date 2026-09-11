@@ -16,6 +16,7 @@ export default function SettingsPage() {
       await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "include",
+        cache: "no-store",
       });
     } catch (error) {
       console.error("Logout error:", error);
@@ -24,7 +25,7 @@ export default function SettingsPage() {
         window.localStorage.removeItem("gamerzadda_device_id");
       } catch {}
 
-      router.replace("/login");
+      window.location.replace("/login");
     }
   }
 
@@ -39,6 +40,7 @@ export default function SettingsPage() {
           >
             ←
           </button>
+
           <h1 className="text-xl font-black">Settings</h1>
         </div>
       </header>
@@ -51,7 +53,10 @@ export default function SettingsPage() {
             className="flex w-full items-center gap-4 rounded-xl px-5 py-4 text-left font-bold text-red-400 transition hover:bg-red-500/10 disabled:opacity-60"
           >
             <span className="text-xl">🚪</span>
-            <span>{loggingOut ? "Logging out..." : "Logout"}</span>
+
+            <span>
+              {loggingOut ? "Logging out..." : "Logout"}
+            </span>
           </button>
         </section>
       </div>

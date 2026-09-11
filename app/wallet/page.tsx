@@ -9,7 +9,6 @@ type Transaction = {
   amount: number;
   type: string;
   description: string | null;
-  reference_id: string | null;
   created_at: string;
 };
 
@@ -32,6 +31,7 @@ type Wallet = {
 
 export default function WalletPage() {
   const router = useRouter();
+
   const [wallet, setWallet] = useState<Wallet>({
     deposit: 0,
     bonus: 0,
@@ -91,30 +91,44 @@ export default function WalletPage() {
     window.location.href = "/wallet/withdraw";
   }
 
-  function formatDate(date: string) {
-    return new Date(date).toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
   function formatAmount(amount: number) {
     return `₹${Number(amount || 0).toFixed(2)}`;
   }
 
   function getTransactionTitle(transaction: Transaction) {
-    const raw = `${transaction.type || ""} ${transaction.description || ""}`.toLowerCase();
+    const raw =
+      `${transaction.type || ""} ${transaction.description || ""}`.toLowerCase();
 
-    if (raw.includes("join") || raw.includes("entry") || raw.includes("tournament")) {
-      if (raw.includes("join") || raw.includes("entry") || Number(transaction.amount) < 0) {
-        return "Tournament Joining Fee";
+    if (raw.includes("daily spin") || raw.includes("spin")) {
+      if (
+        raw.includes("fee") ||
+        raw.includes("entry") ||
+        raw.includes("join")
+      ) {
+        return "Daily Spin Fee";
       }
+
+      if (raw.includes("bonus") || raw.includes("reward")) {
+        return "Daily Spin Reward";
+      }
+
+      return "Daily Spin";
     }
 
-    if (raw.includes("deposit") || raw.includes("add money") || raw.includes("topup") || raw.includes("top-up")) {
+    if (
+      raw.includes("join") ||
+      raw.includes("entry") ||
+      raw.includes("tournament")
+    ) {
+      return "Tournament Joining Fee";
+    }
+
+    if (
+      raw.includes("deposit") ||
+      raw.includes("add money") ||
+      raw.includes("topup") ||
+      raw.includes("top-up")
+    ) {
       return "Add Money";
     }
 
@@ -122,33 +136,68 @@ export default function WalletPage() {
       return "Withdrawal";
     }
 
-    if (raw.includes("win") || raw.includes("prize") || raw.includes("reward")) {
+    if (
+      raw.includes("win") ||
+      raw.includes("prize") ||
+      raw.includes("reward")
+    ) {
       return "Tournament Winning";
     }
 
     return transaction.description || transaction.type || "Wallet Transaction";
   }
 
-  function getStatusClass(status: string) {
-    const value = status.toLowerCase();
-
-    if (
-      value === "approved" ||
-      value === "success" ||
-      value === "completed"
-    ) {
-      return "text-emerald-600";
+  function getIconClass(amount: number) {
+    if (amount > 0) {
+      return "border-emerald-100 bg-emerald-50 text-emerald-600";
     }
 
-    if (
-      value === "rejected" ||
-      value === "failed" ||
-      value === "cancelled"
-    ) {
-      return "text-red-600";
+    if (amount < 0) {
+      return "border-red-100 bg-red-50 text-red-600";
     }
 
-    return "text-amber-600";
+    return "border-slate-200 bg-slate-100 text-slate-500";
+  }
+
+  function getAccentClass(amount: number) {
+    if (amount > 0) return "bg-emerald-500";
+    if (amount < 0) return "bg-red-500";
+    return "bg-slate-300";
+  }
+
+  function getAmountClass(amount: number) {
+    if (amount > 0) return "text-emerald-600";
+    if (amount < 0) return "text-red-600";
+    return "text-slate-500";
+  }
+
+  function getTransactionStatus(amount: number) {
+    if (amount > 0) return "CREDIT";
+    if (amount < 0) return "DEBIT";
+    return "₹0";
+  }
+
+  function getStatusClass(amount: number) {
+    if (amount > 0) return "bg-emerald-50 text-emerald-600";
+    if (amount < 0) return "bg-red-50 text-red-600";
+    return "bg-slate-100 text-slate-500";
+  }
+
+  function formatTransactionDate(dateString: string) {
+    return new Date(dateString).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  function formatTransactionTime(dateString: string) {
+    return new Date(dateString).toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
   }
 
   return (
@@ -157,9 +206,10 @@ export default function WalletPage() {
       <header className="sticky top-0 z-50 border-b border-emerald-100 bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-md items-center justify-between px-4">
           <button
+            type="button"
             onClick={() => router.back()}
             aria-label="Go back"
-            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-95"
+            className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 shadow-[0_8px_25px_rgba(16,185,129,0.10)] transition active:scale-[0.98]"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 transition group-hover:bg-emerald-100">
               <svg
@@ -180,6 +230,7 @@ export default function WalletPage() {
             My <span className="text-emerald-600">Wallet</span>
           </h1>
 
+          <div className="w-11" />
         </div>
       </header>
 
@@ -200,8 +251,6 @@ export default function WalletPage() {
           <div className="mt-2 text-4xl font-extrabold tracking-tight">
             {loading ? "₹..." : formatAmount(wallet.total)}
           </div>
-
-
         </section>
 
         {/* BALANCE BREAKDOWN */}
@@ -225,103 +274,211 @@ export default function WalletPage() {
           />
         </section>
 
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {/* ADD MONEY */}
-            <button
-              type="button"
-              onClick={openDepositPage}
-              disabled={loading}
-              className="group flex min-h-[50px] cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-emerald-300/40 bg-gradient-to-br from-emerald-300 to-emerald-500 px-3 py-2.5 text-xs font-black text-slate-950 shadow-lg shadow-emerald-950/20 transition hover:-translate-y-0.5 hover:shadow-xl active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              + Add Money
-            </button>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {/* ADD MONEY */}
+          <button
+            type="button"
+            onClick={openDepositPage}
+            disabled={loading}
+            className="group flex min-h-[50px] cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-emerald-300/40 bg-gradient-to-br from-emerald-300 to-emerald-500 px-3 py-2.5 text-xs font-black text-slate-950 shadow-lg shadow-emerald-950/20 transition hover:-translate-y-0.5 hover:shadow-xl active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            + Add Money
+          </button>
 
-            {/* WITHDRAW */}
-            <button
-              type="button"
-              onClick={openWithdrawPage}
-              className="group flex min-h-[50px] items-center justify-center gap-1.5 rounded-xl border border-white/70 bg-white px-4 py-3 text-center text-sm font-black text-red-600 shadow-lg shadow-red-950/10 transition hover:-translate-y-0.5 hover:bg-red-50 hover:shadow-xl active:scale-[0.98]"
-            >
-              Withdraw
-            </button>
-          </div>
-
-
+          {/* WITHDRAW */}
+          <button
+            type="button"
+            onClick={openWithdrawPage}
+            className="group flex min-h-[50px] items-center justify-center gap-1.5 rounded-xl border border-white/70 bg-white px-4 py-3 text-center text-sm font-black text-red-600 shadow-lg shadow-red-950/10 transition hover:-translate-y-0.5 hover:bg-red-50 hover:shadow-xl active:scale-[0.98]"
+          >
+            Withdraw
+          </button>
+        </div>
 
         {/* TRANSACTIONS */}
         <section className="mt-5">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-lg font-black text-slate-900">Wallet Transactions</h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black text-slate-900">
+                Wallet Transactions
+              </h2>
+              <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
+                Complete transaction history
+              </p>
+            </div>
 
-            <span className="text-xs font-semibold text-slate-500">
-              Latest 50
-            </span>
+            <div className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1">
+              <span className="text-[11px] font-extrabold text-slate-600">
+                {transactions.length}{" "}
+                {transactions.length === 1 ? "Transaction" : "Transactions"}
+              </span>
+            </div>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
-            {loading ? (
-              <div className="p-5 text-center text-sm text-slate-500">
+          {loading ? (
+            <div className="rounded-2xl border border-emerald-100 bg-white p-6 text-center shadow-sm">
+              <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-emerald-100 border-t-emerald-500" />
+              <p className="mt-3 text-xs font-semibold text-slate-500">
                 Loading transactions...
-              </div>
-            ) : transactions.length === 0 ? (
+              </p>
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
               <EmptyState
                 icon="📜"
                 title="No transactions yet"
                 text="Your wallet transactions will appear here."
               />
-            ) : (
-              <div className="divide-y divide-emerald-50">
-                {transactions.map((transaction) => {
-                  const positive = Number(transaction.amount) >= 0;
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {transactions.map((transaction) => {
+                const amount = Number(transaction.amount || 0);
+                const positive = amount > 0;
+                const negative = amount < 0;
 
-                  return (
+                return (
+                  <div
+                    key={transaction.id}
+                    className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-3.5 shadow-sm transition hover:border-emerald-200 hover:shadow-md"
+                  >
                     <div
-                      key={transaction.id}
-                      className="flex items-center justify-between gap-4 p-4"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
+                      className={`absolute left-0 top-0 h-full w-1 ${getAccentClass(
+                        amount
+                      )}`}
+                    />
+
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        {/* PREMIUM SVG ARROW BOX */}
                         <div
-                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-                            positive
-                              ? "bg-emerald-50"
-                              : "bg-red-50"
-                          }`}
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border shadow-sm ${getIconClass(
+                            amount
+                          )}`}
                         >
-                          {positive ? "↓" : "↑"}
+                          {positive ? (
+                            <svg
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              xmlns="http://www.w3.org/2000/svg"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M12 19V5"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                              />
+                              <path
+                                d="M6.5 11.5L12 5L17.5 11.5"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          ) : negative ? (
+                            <svg
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              xmlns="http://www.w3.org/2000/svg"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M12 5V19"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                              />
+                              <path
+                                d="M6.5 12.5L12 19L17.5 12.5"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          ) : (
+                            <svg
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              xmlns="http://www.w3.org/2000/svg"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M6 12H18"
+                                stroke="currentColor"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          )}
                         </div>
 
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-bold text-slate-800">
-                            {transaction.description ||
-                              transaction.type ||
-                              "Wallet transaction"}
+                          <p className="truncate text-[13px] font-extrabold text-slate-900">
+                            {getTransactionTitle(transaction)}
                           </p>
 
-                          <p className="mt-1 text-[11px] text-white/70">
-                            {formatDate(transaction.created_at)}
+                          <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">
+                            {transaction.description ||
+                              transaction.type ||
+                              "Wallet Transaction"}
                           </p>
+
+                          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="text-[10px] font-bold text-slate-400">
+                              {formatTransactionDate(transaction.created_at)}
+                            </span>
+
+                            <span className="text-[10px] text-slate-300">
+                              •
+                            </span>
+
+                            <span className="text-[10px] font-bold text-slate-400">
+                              {formatTransactionTime(transaction.created_at)}
+                            </span>
+                          </div>
+
+                          {transaction.type && (
+                            <span className="mt-1.5 inline-flex max-w-full truncate rounded-md bg-slate-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400">
+                              {transaction.type}
+                            </span>
+                          )}
                         </div>
                       </div>
 
-                      <div
-                        className={`shrink-0 text-sm font-bold ${
-                          positive
-                            ? "text-emerald-600"
-                            : "text-red-600"
-                        }`}
-                      >
-                        {positive ? "+" : ""}
-                        {formatAmount(transaction.amount)}
+                      <div className="shrink-0 text-right">
+                        <p
+                          className={`text-sm font-black ${getAmountClass(
+                            amount
+                          )}`}
+                        >
+                          {positive ? "+" : ""}
+                          {formatAmount(amount)}
+                        </p>
+
+                        <span
+                          className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[9px] font-extrabold ${getStatusClass(
+                            amount
+                          )}`}
+                        >
+                          {getTransactionStatus(amount)}
+                        </span>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
-
-
       </div>
     </main>
   );
@@ -344,9 +501,7 @@ function BalanceCard({
         </div>
 
         <div>
-          <p className="text-xs font-semibold text-slate-500">
-            {title}
-          </p>
+          <p className="text-xs font-semibold text-slate-500">{title}</p>
 
           <p className="mt-1 text-lg font-black text-slate-900">
             ₹{Number(amount || 0).toFixed(2)}
@@ -370,13 +525,9 @@ function EmptyState({
     <div className="p-5 text-center">
       <div className="text-3xl">{icon}</div>
 
-      <p className="mt-3 text-sm font-bold text-slate-700">
-        {title}
-      </p>
+      <p className="mt-3 text-sm font-bold text-slate-700">{title}</p>
 
-      <p className="mt-1 text-xs font-semibold text-slate-500">
-        {text}
-      </p>
+      <p className="mt-1 text-xs font-semibold text-slate-500">{text}</p>
     </div>
   );
 }

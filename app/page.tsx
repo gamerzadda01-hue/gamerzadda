@@ -75,8 +75,68 @@ export default function Home() {
     bio: "",
     avatarUrl: "",
   });
+  const [walletTotal, setWalletTotal] = useState(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const router = useRouter();
+
+  // AUTO LOGOUT WHEN SESSION IS INVALIDATED
+  useEffect(() => {
+    const CHECK_INTERVAL = 5000;
+    let checking = false;
+
+    async function checkSession() {
+      if (checking) return;
+      checking = true;
+
+      try {
+        const response = await fetch("/api/me", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache",
+          },
+        });
+
+        if (response.status === 401) {
+          try {
+            localStorage.removeItem("gamerzadda_device_id");
+          } catch {}
+
+          if (window.location.pathname !== "/login") {
+            window.location.replace("/login");
+          }
+        }
+      } catch (error) {
+        console.error("Session check error:", error);
+      } finally {
+        checking = false;
+      }
+    }
+
+    checkSession();
+
+    const timer = window.setInterval(checkSession, CHECK_INTERVAL);
+
+    const handleFocus = () => {
+      checkSession();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        checkSession();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   function handleTouchStart(e: React.TouchEvent) {
     setTouchStartX(e.touches[0].clientX);
@@ -176,6 +236,11 @@ export default function Home() {
             avatarUrl: result.profile.avatarUrl || "",
           });
         }
+
+        if (mounted && response.ok && result?.wallet) {
+          const total = Number(result.wallet.total || 0);
+          setWalletTotal(Number.isFinite(total) ? total : 0);
+        }
       } catch (error) {
         console.error("Profile load error:", error);
       }
@@ -225,7 +290,7 @@ export default function Home() {
                 onClick={() => router.push("/wallet")}
                 className="flex min-w-[130px] items-center justify-center gap-2 rounded-full bg-[#641d3b]/80 px-5 py-3 font-bold transition active:scale-95"
               >
-                💰 ₹0
+                💰 ₹{walletTotal.toFixed(2)}
               </button>
 
               {/* NOTIFICATION */}
@@ -692,5 +757,4 @@ function DrawerItem({ icon, text, onClick }: { icon: string; text: string; onCli
     </button>
   );
 }
-
 

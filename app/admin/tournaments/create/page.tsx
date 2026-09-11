@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-const GAMES = ["Free Fire", "Free Fire MAX"];
+const GAMES = ["Free Fire", "Free Fire MAX", "Clash Squad", "Lone Wolf"];
 const MODES = ["Solo", "Duo", "Squad"];
 
 const MAPS = [
@@ -95,6 +95,50 @@ export default function CreateTournamentPage() {
       ...previous,
       [field]: value,
     }));
+  }
+
+  function handleGameChange(value: string) {
+    setForm((previous) => ({
+      ...previous,
+      game: value,
+      ...(value === "Clash Squad" && previous.mode === "Solo"
+        ? {
+            entry_fee: "30",
+            prize_pool: "50",
+            kill_reward: "0",
+            bonus_usable_percent: "0",
+            max_players: "2",
+          }
+        : {}),
+    }));
+
+    if (value === "Clash Squad") {
+      setPrizes([
+        { rank: "1", label: "1st Place", amount: "50" },
+      ]);
+    }
+  }
+
+  function handleModeChange(value: string) {
+    setForm((previous) => ({
+      ...previous,
+      mode: value,
+      ...(previous.game === "Clash Squad" && value === "Solo"
+        ? {
+            entry_fee: "30",
+            prize_pool: "50",
+            kill_reward: "0",
+            bonus_usable_percent: "0",
+            max_players: "2",
+          }
+        : {}),
+    }));
+
+    if (form.game === "Clash Squad" && value === "Solo") {
+      setPrizes([
+        { rank: "1", label: "1st Place", amount: "50" },
+      ]);
+    }
   }
 
 
@@ -779,10 +823,7 @@ export default function CreateTournamentPage() {
             <select
               value={form.game}
               onChange={(event) =>
-                updateField(
-                  "game",
-                  event.target.value
-                )
+                handleGameChange(event.target.value)
               }
             >
               {GAMES.map((game) => (
@@ -804,10 +845,7 @@ export default function CreateTournamentPage() {
             <select
               value={form.mode}
               onChange={(event) =>
-                updateField(
-                  "mode",
-                  event.target.value
-                )
+                handleModeChange(event.target.value)
               }
             >
               {MODES.map((mode) => (

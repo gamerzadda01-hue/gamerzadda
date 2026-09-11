@@ -34,8 +34,100 @@ function formatStartTime(value: string | null) {
   });
 }
 
-export default function FreeFirePage() {
+
+function FreeFireMaxPageSkeleton() {
+  return (
+    <main className="min-h-screen bg-[#f4f4f4] pb-24 text-black">
+      {/* Header */}
+      <div className="sticky top-0 z-50 bg-[#ff174f] px-4 py-1 shadow-md">
+        <div className="relative flex h-8 items-center justify-center">
+          <div className="absolute left-0 h-9 w-9 animate-pulse rounded-xl bg-white/30" />
+          <div className="h-5 w-40 animate-pulse rounded-lg bg-white/30" />
+        </div>
+      </div>
+
+      {/* Banner */}
+      <section className="px-2.5 pt-2.5">
+        <div className="h-36 w-full animate-pulse rounded-2xl bg-gray-200" />
+      </section>
+
+      {/* Mode tabs */}
+      <div className="bg-white px-3 py-3">
+        <div className="h-11 w-full animate-pulse rounded-xl bg-gray-200" />
+      </div>
+
+      {/* Tournament list */}
+      <section className="space-y-3 p-2.5">
+        <div className="flex items-center justify-between px-1">
+          <div className="h-4 w-40 animate-pulse rounded bg-gray-200" />
+          <div className="h-3 w-16 animate-pulse rounded bg-gray-200" />
+        </div>
+
+        <div className="space-y-3">
+          {[1, 2, 3].map((item) => (
+            <div
+              key={item}
+              className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+            >
+              <div className="animate-pulse">
+                {/* Card header */}
+                <div className="flex gap-2 px-2.5 pt-2.5 pb-2">
+                  <div className="h-11 w-11 shrink-0 rounded-xl bg-gray-200" />
+                  <div className="min-w-0 flex-1 space-y-2 pt-1">
+                    <div className="h-2.5 w-24 rounded bg-gray-200" />
+                    <div className="h-4 w-3/4 rounded bg-gray-200" />
+                    <div className="h-2.5 w-full rounded bg-gray-100" />
+                  </div>
+                </div>
+
+                {/* Entry / prize / kill */}
+                <div className="grid grid-cols-3 border-y border-gray-100">
+                  {[1, 2, 3].map((box) => (
+                    <div key={box} className="space-y-2 px-2 py-2.5">
+                      <div className="mx-auto h-2 w-12 rounded bg-gray-100" />
+                      <div className="mx-auto h-3 w-16 rounded bg-gray-200" />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Progress */}
+                <div className="px-2.5 pt-2.5">
+                  <div className="mb-1.5 flex justify-between">
+                    <div className="h-2 w-16 rounded bg-gray-100" />
+                    <div className="h-2 w-12 rounded bg-gray-100" />
+                  </div>
+                  <div className="h-1.5 rounded-full bg-gray-100" />
+                </div>
+
+                {/* Details */}
+                <div className="grid grid-cols-3 gap-1 p-2.5">
+                  {[1, 2, 3].map((box) => (
+                    <div key={box} className="space-y-1.5 rounded-lg bg-gray-50 px-1 py-2">
+                      <div className="mx-auto h-2 w-12 rounded bg-gray-100" />
+                      <div className="mx-auto h-2.5 w-14 rounded bg-gray-200" />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Button */}
+                <div className="h-10 bg-gray-200" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Bottom nav */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3">
+        <div className="mx-auto h-[68px] max-w-md animate-pulse rounded-[22px] bg-white/80 shadow-lg" />
+      </div>
+    </main>
+  );
+}
+
+export default function FreeFireMaxTournamentPage() {
   const router = useRouter();
+  const [initialLoading, setInitialLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("SOLO");
   const [navActive, setNavActive] = useState<"matches" | "home" | "support">("home");
   const navRef = useRef<HTMLDivElement | null>(null);
@@ -56,13 +148,18 @@ export default function FreeFirePage() {
   const touchStartY = useRef<number | null>(null);
   const isSwiping = useRef(false);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setInitialLoading(false), 700);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   // Show only the selected game mode.
   const filteredTournaments = tournaments.filter((tournament) => {
     const mode = String(tournament.mode ?? "").trim().toLowerCase();
     return mode === activeTab.toLowerCase();
   });
 
-  // LOAD FREE FIRE BANNERS
+  // LOAD FREE FIRE MAX BANNERS
   useEffect(() => {
     async function loadBanners() {
       setBannersLoading(true);
@@ -70,12 +167,12 @@ export default function FreeFirePage() {
         .from("banners")
         .select("id,image_url,click_url,title")
         .eq("is_active", true)
-        .eq("game_type", "freefire")
+        .eq("game_type", "freefiremax")
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: false });
 
       if (error) {
-        console.error("Free Fire banners:", error);
+        console.error("Free Fire MAX banners:", error);
         setDbBanners([]);
       } else {
         setDbBanners(data || []);
@@ -119,7 +216,7 @@ export default function FreeFirePage() {
           const status = String(item.status ?? "").trim().toLowerCase();
 
           return (
-            (game === "free fire" || game === "free fire max") &&
+            game === "free fire max" &&
             status === "upcoming"
           );
         });
@@ -191,13 +288,13 @@ export default function FreeFirePage() {
           status: item.status || "upcoming",
         }));
 
-        console.log("FREE FIRE TOURNAMENTS AFTER FILTER:", mapped);
+        console.log("FREE FIRE MAX TOURNAMENTS AFTER FILTER:", mapped);
 
         if (!cancelled) {
           setTournaments(mapped);
         }
       } catch (error) {
-        console.error("Free Fire tournaments:", error);
+        console.error("Free Fire MAX tournaments:", error);
 
         if (!cancelled) {
           setTournamentError(
@@ -248,7 +345,7 @@ export default function FreeFirePage() {
           const status = String(item.status || "").trim().toLowerCase();
 
           return (
-            game === "free fire" &&
+            game === "free fire max" &&
             status === "upcoming"
           );
         });
@@ -321,10 +418,10 @@ export default function FreeFirePage() {
           status: item.status || "upcoming",
         }));
 
-        console.log("FREE FIRE TOURNAMENTS AFTER FILTER:", mapped);
+        console.log("FREE FIRE MAX TOURNAMENTS AFTER FILTER:", mapped);
         setTournaments(mapped);
       } catch (error) {
-        console.error("Free Fire tournaments:", error);
+        console.error("Free Fire MAX tournaments:", error);
         setTournaments([]);
       } finally {
         setTournamentsLoading(false);
@@ -363,6 +460,10 @@ export default function FreeFirePage() {
     return () => clearInterval(timer);
   }, [dbBanners.length]);
 
+  if (initialLoading) {
+    return <FreeFireMaxPageSkeleton />;
+  }
+
   return (
     <main className="min-h-screen bg-[#f4f4f4] pb-20 text-black">
 
@@ -391,7 +492,7 @@ export default function FreeFirePage() {
           </button>
 
           <h1 className="text-lg font-black tracking-wide">
-            FREE FIRE
+            FREE FIRE MAX
           </h1>
 
         </div>
@@ -449,7 +550,7 @@ export default function FreeFirePage() {
             <div className="h-full w-full animate-pulse rounded-2xl bg-gray-200" />
           ) : dbBanners.length === 0 ? (
             <div className="flex h-full w-full items-center justify-center rounded-2xl bg-gray-200 text-xs font-bold text-gray-500">
-              No Free Fire banners available
+              No Free Fire MAX banners available
             </div>
           ) : (
             <>
@@ -473,7 +574,7 @@ export default function FreeFirePage() {
                   >
                     <img
                       src={item.image_url}
-                      alt={item.title || "Free Fire banner"}
+                      alt={item.title || "Free Fire MAX banner"}
                       className="h-full w-full rounded-2xl object-cover"
                       loading={index === 0 ? "eager" : "lazy"}
                       decoding="async"
@@ -894,7 +995,7 @@ function TournamentCard({
           >
             <img
               src="/freefire-icon.png"
-              alt="Free Fire"
+              alt="Free Fire MAX"
               className="h-10 w-10 object-contain"
             />
           </div>
@@ -904,7 +1005,7 @@ function TournamentCard({
               {!isDuo && (
                 <>
                   <span className="text-[8px] font-black uppercase tracking-wide text-[#ff174f]">
-                    FREE FIRE
+                    FREE FIRE MAX
                   </span>
 
                   <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[7px] font-black uppercase text-gray-500">
@@ -1064,7 +1165,7 @@ function TournamentCard({
       <button
         type="button"
         onClick={() => {
-          window.location.href = `/freefire/tournament/${tournament.id}`;
+          window.location.href = `/freefiremax/tournament/${tournament.id}`;
         }}
         className={`w-full py-2.5 text-[11px] font-black tracking-wide text-white transition-all active:scale-[0.99] ${
           isDuo

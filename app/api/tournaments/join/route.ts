@@ -8,9 +8,14 @@ const SESSION_COOKIE = "gamerzadda_session";
 async function getUserId() {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
+
   if (!token) return null;
 
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const tokenHash = crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
+
   const { data: session } = await supabaseAdmin
     .from("user_sessions")
     .select("user_id, expires_at")
@@ -18,102 +23,205 @@ async function getUserId() {
     .maybeSingle();
 
   if (!session) return null;
+
   if (new Date(session.expires_at) <= new Date()) {
-    await supabaseAdmin.from("user_sessions").delete().eq("token_hash", tokenHash);
+    await supabaseAdmin
+      .from("user_sessions")
+      .delete()
+      .eq("token_hash", tokenHash);
+
     return null;
   }
+
   return session.user_id;
 }
 
 export async function POST(request: Request) {
   try {
     const userId = await getUserId();
-    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const body = await request.json();
-    const tournamentId = String(body?.tournamentId || "").trim();
-    const gameName = String(body?.gameName || "").trim().toUpperCase().slice(0, 20);
-    const uid = String(body?.uid || "").replace(/\D/g, "").slice(0, 15);
-    const level = Number(body?.level);
-
-    if (!tournamentId || !gameName || !uid || !Number.isInteger(level) || level < 1 || level > 100) {
-      return NextResponse.json({ error: "Invalid join details." }, { status: 400 });
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
-    const { data: tournament, error: tournamentError } = await supabaseAdmin
-      .from("tournaments")
-      .select("id,entry_fee,max_players,status,bonus_usable_percent")
-      .eq("id", tournamentId)
-      .maybeSingle();
+    const body = await request.json();
+
+    const tournamentId = String(body?.tournamentId || "").trim();
+
+    const gameName = String(body?.gameName || "")
+      .trim()
+      .toUpperCase()
+      .slice(0, 20);
+
+    const uid = String(body?.uid || "")
+      .replace(/\D/g, "")
+      .slice(0, 15);
+
+    const level = Number(body?.level);
+
+    if (
+      !tournamentId ||
+      !gameName ||
+      !uid ||
+      !Number.isInteger(level) ||
+      level < 1 ||
+      level > 100
+    ) {
+      return NextResponse.json(
+        { error: "Invalid join details." },
+        { status: 400 }
+      );
+    }
+
+    const { data: tournament, error: tournamentError } =
+      await supabaseAdmin
+        .from("tournaments")
+        .select(
+          "id,entry_fee,max_players,status,bonus_usable_percent"
+        )
+        .eq("id", tournamentId)
+        .maybeSingle();
 
     if (tournamentError) throw tournamentError;
-    if (!tournament) return NextResponse.json({ error: "Tournament not found." }, { status: 404 });
 
-    const entryFee = Math.max(0, Number(tournament.entry_fee || 0));
+    if (!tournament) {
+      return NextResponse.json(
+        { error: "Tournament not found." },
+        { status: 404 }
+      );
+    }
+
+    const entryFee = Math.max(
+      0,
+      Number(tournament.entry_fee || 0)
+    );
 
     const { count } = await supabaseAdmin
       .from("tournament_entries")
-      .select("id", { count: "exact", head: true })
+      .select("id", {
+        count: "exact",
+        head: true,
+      })
       .eq("tournament_id", tournamentId)
       .eq("cancelled", false);
 
-    if (Number(tournament.max_players || 0) > 0 && (count || 0) >= Number(tournament.max_players)) {
-      return NextResponse.json({ error: "Tournament is full." }, { status: 409 });
+    if (
+      Number(tournament.max_players || 0) > 0 &&
+      (count || 0) >= Number(tournament.max_players)
+    ) {
+      return NextResponse.json(
+        { error: "Tournament is full." },
+        { status: 409 }
+      );
     }
 
-    // Because tournament_entries has a unique (tournament_id, user_id) constraint,
-    // a cancelled entry must be REUSED instead of inserting a second row.
-    const { data: existingEntry, error: existingEntryError } = await supabaseAdmin
-      .from("tournament_entries")
-      .select("id,cancelled")
-      .eq("tournament_id", tournamentId)
-      .eq("user_id", userId)
-      .maybeSingle();
+    // Reuse cancelled entry because tournament_entries
+    // has unique (tournament_id, user_id).
+    const { data: existingEntry, error: existingEntryError } =
+      await supabaseAdmin
+        .from("tournament_entries")
+        .select("id,cancelled")
+        .eq("tournament_id", tournamentId)
+        .eq("user_id", userId)
+        .maybeSingle();
 
     if (existingEntryError) throw existingEntryError;
 
     if (existingEntry && !existingEntry.cancelled) {
       return NextResponse.json(
-        { error: "You have already joined this tournament." },
+        {
+          error: "You have already joined this tournament.",
+        },
         { status: 409 }
       );
     }
 
-    const { data: wallet, error: walletError } = await supabaseAdmin
-      .from("wallet_balances")
-      .select("deposit_balance,bonus_balance,winning_balance")
-      .eq("user_id", userId)
-      .maybeSingle();
+    const { data: wallet, error: walletError } =
+      await supabaseAdmin
+        .from("wallet_balances")
+        .select(
+          "deposit_balance,bonus_balance,winning_balance"
+        )
+        .eq("user_id", userId)
+        .maybeSingle();
 
     if (walletError) throw walletError;
-    if (!wallet) return NextResponse.json({ error: "Wallet not found." }, { status: 404 });
+
+    if (!wallet) {
+      return NextResponse.json(
+        { error: "Wallet not found." },
+        { status: 404 }
+      );
+    }
 
     const deposit = Number(wallet.deposit_balance || 0);
     const bonus = Number(wallet.bonus_balance || 0);
     const winning = Number(wallet.winning_balance || 0);
-    const bonusPercent = Math.min(100, Math.max(0, Number(tournament.bonus_usable_percent || 0)));
-    const bonusUsable = bonus * bonusPercent / 100;
+
+    const bonusPercent = Math.min(
+      100,
+      Math.max(
+        0,
+        Number(tournament.bonus_usable_percent || 0)
+      )
+    );
+
+    const bonusUsable =
+      (bonus * bonusPercent) / 100;
 
     if (deposit + winning + bonusUsable < entryFee) {
-      return NextResponse.json({
-        success: false,
-        code: "INSUFFICIENT_BALANCE",
-        error: "Insufficient wallet balance. Please add money to your wallet.",
-      }, { status: 402 });
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INSUFFICIENT_BALANCE",
+          error:
+            "Insufficient wallet balance. Please add money to your wallet.",
+        },
+        { status: 402 }
+      );
     }
 
-    // Same deduction order shown in the join popup: Bonus -> Deposit -> Winning.
-    const bonusCut = Math.min(bonusUsable, entryFee);
+    // Bonus -> Deposit -> Winning
+    const bonusCut = Math.min(
+      bonusUsable,
+      entryFee
+    );
+
     const afterBonus = entryFee - bonusCut;
-    const depositCut = Math.min(deposit, afterBonus);
-    const winningCut = Math.max(0, afterBonus - depositCut);
 
-    const newDeposit = Math.round((deposit - depositCut) * 100) / 100;
-    const newBonus = Math.round((bonus - bonusCut) * 100) / 100;
-    const newWinning = Math.round((winning - winningCut) * 100) / 100;
+    const depositCut = Math.min(
+      deposit,
+      afterBonus
+    );
 
-    // Conditional update prevents charging an already-changed wallet.
-    const { data: updatedWallet, error: updateError } = await supabaseAdmin
+    const winningCut = Math.max(
+      0,
+      afterBonus - depositCut
+    );
+
+    const newDeposit =
+      Math.round(
+        (deposit - depositCut) * 100
+      ) / 100;
+
+    const newBonus =
+      Math.round(
+        (bonus - bonusCut) * 100
+      ) / 100;
+
+    const newWinning =
+      Math.round(
+        (winning - winningCut) * 100
+      ) / 100;
+
+    // Conditional update prevents double charging.
+    const {
+      data: updatedWallet,
+      error: updateError,
+    } = await supabaseAdmin
       .from("wallet_balances")
       .update({
         deposit_balance: newDeposit,
@@ -125,28 +233,50 @@ export async function POST(request: Request) {
       .eq("deposit_balance", deposit)
       .eq("bonus_balance", bonus)
       .eq("winning_balance", winning)
-      .select("deposit_balance,bonus_balance,winning_balance")
+      .select(
+        "deposit_balance,bonus_balance,winning_balance"
+      )
       .maybeSingle();
 
     if (updateError || !updatedWallet) {
-      return NextResponse.json({ error: "Wallet changed. Please try joining again." }, { status: 409 });
+      return NextResponse.json(
+        {
+          error:
+            "Wallet changed. Please try joining again.",
+        },
+        { status: 409 }
+      );
     }
 
-    // Keep the user's entered game details in the existing users table used by the admin participants page.
-    const { error: userUpdateError } = await supabaseAdmin
-      .from("users")
-      .update({
-        game_name: gameName,
-        free_fire_uid: uid,
-        level,
-      })
-      .eq("id", userId);
+    // Save player's Free Fire details.
+    const { error: userUpdateError } =
+      await supabaseAdmin
+        .from("users")
+        .update({
+          game_name: gameName,
+          free_fire_uid: uid,
+          level,
+        })
+        .eq("id", userId);
 
     if (userUpdateError) {
-      await supabaseAdmin.from("wallet_balances").update({
-        deposit_balance: deposit, bonus_balance: bonus, winning_balance: winning, updated_at: new Date().toISOString(),
-      }).eq("user_id", userId);
-      return NextResponse.json({ error: "Unable to save player details. Wallet was not charged." }, { status: 500 });
+      await supabaseAdmin
+        .from("wallet_balances")
+        .update({
+          deposit_balance: deposit,
+          bonus_balance: bonus,
+          winning_balance: winning,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", userId);
+
+      return NextResponse.json(
+        {
+          error:
+            "Unable to save player details. Wallet was not charged.",
+        },
+        { status: 500 }
+      );
     }
 
     let entry;
@@ -163,7 +293,9 @@ export async function POST(request: Request) {
         .eq("id", existingEntry.id)
         .eq("tournament_id", tournamentId)
         .eq("user_id", userId)
-        .select("id,tournament_id,user_id,free_fire_uid,game_name")
+        .select(
+          "id,tournament_id,user_id,free_fire_uid,game_name"
+        )
         .single();
 
       entry = result.data;
@@ -178,7 +310,9 @@ export async function POST(request: Request) {
           game_name: gameName,
           cancelled: false,
         })
-        .select("id,tournament_id,user_id,free_fire_uid,game_name")
+        .select(
+          "id,tournament_id,user_id,free_fire_uid,game_name"
+        )
         .single();
 
       entry = result.data;
@@ -186,16 +320,31 @@ export async function POST(request: Request) {
     }
 
     if (entryError || !entry) {
-      await supabaseAdmin.from("wallet_balances").update({
-        deposit_balance: deposit, bonus_balance: bonus, winning_balance: winning, updated_at: new Date().toISOString(),
-      }).eq("user_id", userId);
-      return NextResponse.json({ error: entryError?.message || "Unable to create tournament entry." }, { status: 500 });
+      await supabaseAdmin
+        .from("wallet_balances")
+        .update({
+          deposit_balance: deposit,
+          bonus_balance: bonus,
+          winning_balance: winning,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", userId);
+
+      return NextResponse.json(
+        {
+          error:
+            entryError?.message ||
+            "Unable to create tournament entry.",
+        },
+        { status: 500 }
+      );
     }
 
-    // A re-join reuses the same entry id. Remove the previous join's fee records
-    // so the next cancellation refunds ONLY this join's 70% deduction.
+    // If rejoining, remove old entry-fee transactions.
     if (existingEntry?.id) {
-      const { error: oldTransactionsError } = await supabaseAdmin
+      const {
+        error: oldTransactionsError,
+      } = await supabaseAdmin
         .from("wallet_transactions")
         .delete()
         .eq("user_id", userId)
@@ -203,16 +352,32 @@ export async function POST(request: Request) {
         .eq("type", "entry_fee");
 
       if (oldTransactionsError) {
-        await supabaseAdmin.from("tournament_entries").update({ cancelled: true }).eq("id", entry.id);
-        await supabaseAdmin.from("wallet_balances").update({
-          deposit_balance: deposit, bonus_balance: bonus, winning_balance: winning, updated_at: new Date().toISOString(),
-        }).eq("user_id", userId);
-        return NextResponse.json({ error: "Unable to reset previous entry transaction. Wallet was not charged." }, { status: 500 });
+        await supabaseAdmin
+          .from("tournament_entries")
+          .update({ cancelled: true })
+          .eq("id", entry.id);
+
+        await supabaseAdmin
+          .from("wallet_balances")
+          .update({
+            deposit_balance: deposit,
+            bonus_balance: bonus,
+            winning_balance: winning,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", userId);
+
+        return NextResponse.json(
+          {
+            error:
+              "Unable to reset previous entry transaction. Wallet was not charged.",
+          },
+          { status: 500 }
+        );
       }
     }
 
-    // Record the exact amount taken from each wallet bucket so cancellation
-    // can later refund 70% back to the SAME bucket(s).
+    // Record exact wallet deductions.
     const transactionRows = [
       bonusCut > 0
         ? {
@@ -223,6 +388,7 @@ export async function POST(request: Request) {
             reference_id: entry.id,
           }
         : null,
+
       depositCut > 0
         ? {
             user_id: userId,
@@ -232,6 +398,7 @@ export async function POST(request: Request) {
             reference_id: entry.id,
           }
         : null,
+
       winningCut > 0
         ? {
             user_id: userId,
@@ -253,30 +420,61 @@ export async function POST(request: Request) {
       } => transaction !== null
     );
 
-    const { error: transactionError } = await supabaseAdmin
-      .from("wallet_transactions")
-      .insert(transactionRows);
+    const { error: transactionError } =
+      await supabaseAdmin
+        .from("wallet_transactions")
+        .insert(transactionRows);
 
     if (transactionError) {
-      await supabaseAdmin.from("tournament_entries").delete().eq("id", entry.id);
-      await supabaseAdmin.from("wallet_balances").update({
-        deposit_balance: deposit, bonus_balance: bonus, winning_balance: winning, updated_at: new Date().toISOString(),
-      }).eq("user_id", userId);
-      return NextResponse.json({ error: "Unable to record wallet transaction. Wallet was not charged." }, { status: 500 });
+      await supabaseAdmin
+        .from("tournament_entries")
+        .delete()
+        .eq("id", entry.id);
+
+      await supabaseAdmin
+        .from("wallet_balances")
+        .update({
+          deposit_balance: deposit,
+          bonus_balance: bonus,
+          winning_balance: winning,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", userId);
+
+      return NextResponse.json(
+        {
+          error:
+            "Unable to record wallet transaction. Wallet was not charged.",
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
       entry,
       wallet: {
-        deposit: Number(updatedWallet.deposit_balance || 0),
-        bonus: Number(updatedWallet.bonus_balance || 0),
-        winning: Number(updatedWallet.winning_balance || 0),
-        total: Number(updatedWallet.deposit_balance || 0) + Number(updatedWallet.bonus_balance || 0) + Number(updatedWallet.winning_balance || 0),
+        deposit: Number(
+          updatedWallet.deposit_balance || 0
+        ),
+        bonus: Number(
+          updatedWallet.bonus_balance || 0
+        ),
+        winning: Number(
+          updatedWallet.winning_balance || 0
+        ),
+        total:
+          Number(updatedWallet.deposit_balance || 0) +
+          Number(updatedWallet.bonus_balance || 0) +
+          Number(updatedWallet.winning_balance || 0),
       },
     });
   } catch (error) {
     console.error("Tournament join API:", error);
-    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
+
+    return NextResponse.json(
+      { error: "Internal server error." },
+      { status: 500 }
+    );
   }
 }

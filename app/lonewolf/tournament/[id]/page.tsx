@@ -9,7 +9,7 @@ const BANNER_URL = "/banner.png";
 
 export default function TournamentPage() {
   const router = useRouter();
-  const [popup, setPopup] = useState<"how" | "rules" | "join" | null>(null);
+  const [popup, setPopup] = useState<"how" | "rules" | "join" | "participants" | null>(null);
   const [gameName, setGameName] = useState("");
   const [uid, setUid] = useState("");
   const [level, setLevel] = useState("");
@@ -18,9 +18,6 @@ export default function TournamentPage() {
   const [joinError, setJoinError] = useState("");
   const [insufficientBalanceOpen, setInsufficientBalanceOpen] = useState(false);
   const [joined, setJoined] = useState(false);
-  // Solo joined-status check runs independently after tournament data loads.
-  // Keep the button in a checking state so JOIN NOW does not flash after refresh.
-  const [joinedChecking, setJoinedChecking] = useState(false);
   const [slideValue, setSlideValue] = useState(0);
   const [joining, setJoining] = useState(false);
   const [duoAction, setDuoAction] = useState<"create" | "join">("create");
@@ -125,12 +122,10 @@ export default function TournamentPage() {
   );
   const entryFee = Number(tournament?.entry_fee ?? 0);
 
-  // IMPORTANT: Duo is enabled ONLY when the tournament mode is exactly "duo".
-  // Solo must always use the original /api/tournaments/join flow.
-  const tournamentMode = String(tournament?.mode ?? "")
-    .trim()
-    .toLowerCase();
-  const isDuoTournament = tournamentMode === "duo";
+  // Duo UI must render ONLY for tournaments whose mode is exactly "Duo".
+  // Solo keeps the original Join Tournament UI.
+  const isDuoTournament =
+    String(tournament?.mode ?? "").trim().toLowerCase() === "duo";
 
   const getDuoTeamStorageKey = (tournamentId: string) =>
     `gamerzadda:duo-team-code:${String(tournamentId).trim()}`;
@@ -264,7 +259,8 @@ export default function TournamentPage() {
   };
 
   async function loadParticipants() {
-    if (!tournament) return;
+    // Participants are visible only to users who have joined this tournament.
+    if (!tournament || !joined) return;
 
     setParticipantsLoading(true);
     setParticipantsError("");
@@ -414,30 +410,6 @@ export default function TournamentPage() {
       setPageLoading(true);
       setPageError("");
 
-      // Start the Solo joined check immediately on refresh. This runs in
-      // parallel with the tournament/count/prize requests instead of waiting
-      // for the tournament page to finish loading first.
-      const joinedPromise = fetch(
-        `/api/tournaments/my-entry?tournamentId=${encodeURIComponent(id)}`,
-        {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        }
-      )
-        .then(async (response) => {
-          const result = await response.json().catch(() => null);
-          return { response, result };
-        })
-        .catch((error) => {
-          console.error("Initial my-entry check:", error);
-          return { response: null, result: null };
-        });
-
-      // Do not show JOIN NOW while the user's existing entry is still being
-      // verified. Duo has its own separate status system below.
-      setJoinedChecking(true);
-
       try {
         const { data, error } = await supabase
           .from("tournaments")
@@ -456,21 +428,12 @@ export default function TournamentPage() {
 
         setTournament(data as TournamentData);
 
-        // These independent Supabase queries run together.
-        const [entriesResult, prizesResult] = await Promise.all([
-          supabase
-            .from("tournament_entries")
-            .select("id", { count: "exact", head: true })
-            .eq("tournament_id", id)
-            .eq("cancelled", false),
-          supabase
-            .from("tournament_prizes")
-            .select("id,rank,label,amount")
-            .eq("tournament_id", id)
-            .order("rank", { ascending: true }),
-        ]);
+        const { count: entryCount, error: entriesError } = await supabase
+          .from("tournament_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("tournament_id", id)
+          .eq("cancelled", false);
 
-        const { count: entryCount, error: entriesError } = entriesResult;
         if (entriesError) {
           console.error("Tournament entries:", entriesError);
           setJoinedPlayers(0);
@@ -478,38 +441,17 @@ export default function TournamentPage() {
           setJoinedPlayers(entryCount ?? 0);
         }
 
-        const { data: prizeData, error: prizeError } = prizesResult;
+        const { data: prizeData, error: prizeError } = await supabase
+          .from("tournament_prizes")
+          .select("id,rank,label,amount")
+          .eq("tournament_id", id)
+          .order("rank", { ascending: true });
+
         if (prizeError) {
           console.error("Tournament prizes:", prizeError);
           setPrizes([]);
         } else {
           setPrizes((prizeData || []) as PrizeData[]);
-        }
-
-        // Apply the already-running joined check as soon as it finishes.
-        // IMPORTANT: Duo uses its own team-status loader, so never let the
-        // Solo entry response overwrite Duo state.
-        const { response: joinedResponse, result: joinedResult } =
-          await joinedPromise;
-
-        if (String(data.mode ?? "").trim().toLowerCase() !== "duo") {
-          if (joinedResponse?.ok && joinedResult?.success) {
-            const isJoined = Boolean(joinedResult.joined);
-            setJoined(isJoined);
-            setCurrentUserId(
-              joinedResult.userId ? String(joinedResult.userId).trim() : null
-            );
-            setCurrentEntryId(
-              joinedResult.entryId ? String(joinedResult.entryId).trim() : null
-            );
-          } else {
-            setJoined(false);
-            setCurrentUserId(null);
-            setCurrentEntryId(null);
-          }
-          setJoinedChecking(false);
-        } else {
-          setJoinedChecking(false);
         }
       } catch (error) {
         console.error("Tournament detail:", error);
@@ -518,7 +460,6 @@ export default function TournamentPage() {
         );
         setTournament(null);
       } finally {
-        setJoinedChecking(false);
         setPageLoading(false);
       }
     }
@@ -674,6 +615,51 @@ export default function TournamentPage() {
 
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadMyEntry() {
+      if (!tournament?.id) {
+        setCurrentUserId(null);
+        setCurrentEntryId(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/tournaments/my-entry?tournamentId=${encodeURIComponent(tournament.id)}`,
+          {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          }
+        );
+
+        const result = await response.json().catch(() => null);
+        if (!active) return;
+
+        if (response.ok && result?.success && result?.joined) {
+          setCurrentUserId(result.userId ? String(result.userId).trim() : null);
+          setCurrentEntryId(result.entryId ? String(result.entryId).trim() : null);
+        } else {
+          setCurrentUserId(null);
+          setCurrentEntryId(null);
+        }
+      } catch (error) {
+        console.error("My tournament entry:", error);
+        if (active) {
+          setCurrentUserId(null);
+          setCurrentEntryId(null);
+        }
+      }
+    }
+
+    loadMyEntry();
+
+    return () => {
+      active = false;
+    };
+  }, [tournament?.id]);
 
   // Recover the creator's active Duo team code from the database every time
   // the tournament page loads. This makes the code persistent even if the
@@ -1006,12 +992,6 @@ export default function TournamentPage() {
   };
 
   const handleDuoCreate = async () => {
-    // Safety guard: Solo must NEVER call the Duo create API.
-    if (!isDuoTournament) {
-      await handleJoin();
-      return;
-    }
-
     if (!gameName.trim()) {
       setJoinError("Please enter your In-Game Name.");
       return;
@@ -1098,12 +1078,6 @@ export default function TournamentPage() {
   };
 
   const handleDuoJoin = async () => {
-    // Safety guard: Solo must NEVER call the Duo join API.
-    if (!isDuoTournament) {
-      await handleJoin();
-      return;
-    }
-
     if (!teamCode.trim() || !/^\d{6}$/.test(teamCode.trim())) {
       setJoinError("Please enter a valid 6-digit team code.");
       return;
@@ -1330,10 +1304,9 @@ export default function TournamentPage() {
     Array.isArray(tournament.rules) && tournament.rules.length > 0
       ? tournament.rules
       : [
-          "Don't invite unregistered players.",
-          "Double Vector is not allowed.",
-          "Screen recording is mandatory.",
-          "Read all the rules before joining GamerzAdda tournaments.",
+          "ALWAYS ON SCREEN RECORDING WHILE PLAYING GAMERZADDA.",
+          "ZONE PACKING IS NOT ALLOWED.",
+          "ABUSING IN CUSTOM CHAT IS STRICTLY PROHIBITED.",
         ];
 
   return (
@@ -1391,7 +1364,7 @@ export default function TournamentPage() {
               {tournamentRules.slice(0, 5).map((rule, index) => (
                 <RulePreview
                   key={`${rule}-${index}`}
-                  icon={index === 0 ? "📖" : "🚫"}
+                  icon={index === 0 ? "" : ""}
                   text={rule}
                 />
               ))}
@@ -1411,7 +1384,7 @@ export default function TournamentPage() {
               <div className="min-w-0">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-[#ff174f]/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-[#ff174f]">
-                    Free Fire
+                    lonewolf
                   </span>
                   <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-gray-500">
                     {tournament.mode || "Solo"}
@@ -1607,11 +1580,7 @@ export default function TournamentPage() {
       {/* BOTTOM ACTIONS */}
       <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white/95 p-3 backdrop-blur-md">
         <div className="mx-auto grid max-w-md grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => router.push("/freefire/tournament/mymatches")}
-            className="rounded-xl border border-gray-200 bg-white py-3 text-[10px] font-black text-gray-700 shadow-sm"
-          >
+          <button className="rounded-xl border border-gray-200 bg-white py-3 text-[10px] font-black text-gray-700 shadow-sm">
             👤
             <br />
             MY MATCHES
@@ -1620,6 +1589,10 @@ export default function TournamentPage() {
           <button
             type="button"
             onClick={() => {
+              if (!joined) {
+                setPopup("participants");
+                return;
+              }
               setParticipantSearch("");
               setParticipantsOpen(true);
               loadCurrentUserForCancel();
@@ -1629,21 +1602,20 @@ export default function TournamentPage() {
           >
             👥
             <br />
-            {isDuoTournament ? "MY TEAM" : "PARTICIPANTS"}
+            {joined
+              ? isDuoTournament
+                ? "MY TEAM"
+                : "PARTICIPANTS"
+              : "JOIN TO VIEW"}
           </button>
 
           <button
             onClick={openJoinPopup}
             className="bg-red-500 hover:bg-red-600 disabled:bg-emerald-500 disabled:hover:bg-emerald-500 disabled:cursor-not-allowed rounded-xl py-3 text-[10px] font-black text-white shadow-lg"
-            disabled={joined || (!isDuoTournament && joinedChecking)}
-          >
-            {joinedChecking && !isDuoTournament ? "⏳" : joined ? "✓" : "🔥"}
+           disabled={joined}>
+            {joined ? "✓" : "🔥"}
             <br />
-            {joinedChecking && !isDuoTournament
-              ? "CHECKING..."
-              : joined
-                ? "ALREADY JOINED"
-                : "JOIN NOW"}
+            {joined ? "ALREADY JOINED" : "JOIN NOW"}
           </button>
         </div>
       </div>
@@ -1825,6 +1797,7 @@ export default function TournamentPage() {
 
                       const values = [
                         team.team_name,
+                        team.team_code,
                         team.creator_ign,
                         team.creator_uid,
                         creator?.users?.full_name,
@@ -1850,7 +1823,7 @@ export default function TournamentPage() {
                           </div>
                           <p className="mt-3 text-sm font-black text-gray-800">No teams found</p>
                           <p className="mt-1 text-[10px] font-semibold text-gray-400">
-                            Try another team name, IGN or UID.
+                            Try another team name, code, IGN or UID.
                           </p>
                         </div>
                       );
@@ -1903,6 +1876,12 @@ export default function TournamentPage() {
                                 </h4>
                               </div>
 
+                              <div className="shrink-0 rounded-xl border border-red-100 bg-white px-2.5 py-1.5 text-center shadow-sm">
+                                <p className="text-[7px] font-black text-gray-400">TEAM CODE</p>
+                                <p className="mt-0.5 text-[12px] font-black tracking-[0.12em] text-red-600">
+                                  {team.team_code}
+                                </p>
+                              </div>
                             </div>
                           </div>
 
@@ -2146,19 +2125,17 @@ export default function TournamentPage() {
                 "YOU WILL GET ROOM ID & PASSWORD ON THE SAME MATCH TIME.",
                 "(EX. YOUR MATCH IS SCHEDULED AT 2PM, THEN YOU WILL GET ID & PASSWORD AT 2:00 PM AND THE MATCH WILL BE STARTED AT 2:10PM.)",
                 "YOU WILL GET ID & PASSWORD VIA GAMERZADDA NOTIFICATION.",
-                "TEAMUP NOT ALLOWED.",
-                "ALWAYS ON SCREEN RECORDING WHILE PLAYING GAMERZADDA MATCHES.",
-                "MONSTER TRUCK OR ANY VEHICLES ARE NOT ALLOWED IN SURVIVAL MATCHES.",
-                "HEADSHOT (%) SHOULD NOT BE MORE THAN 60 IN CAREER MODE.",
-                "MULTIPLE ACCOUNTS ARE NOT ALLOWED.",
-                "REFUND FOR PLAYERS WHO ARE KILLED BY HACKERS.",
-                "PLAYING MATCHES ON CALL IS NOT ALLOWED.",
-                "CUSTOM POV RECORDING IS MANDATORY.",
-                "THIRD PARTY APPLICATIONS ARE NOT ALLOWED.",
-                "PC PLAYERS ARE NOT ALLOWED.",
-                "INVITING UNREGISTERED PLAYERS ARE NOT ALLOWED.",
-                "DOUBLE VECTOR ARE NOT ALLOWED.",
+                "ZONE PACKING IS NOT ALLOWED.",
                 "MINIMUM LEVEL SHOULD BE 25.",
+                "PC PLAYER ARE NOT ALLOWED.",
+                "ALWAYS ON SCREEN RECORDING WHILE PLAYING GAMERZADDA.",
+                "HEADSHOT (%) SHOULD NOT BE MORE THAN 60 IN CS CARRIER MODE.",
+                "REFUND FOR PLAYERS WHO ARE KILLED BY HACKERS.",
+                "DOUBLE VECTOR IS ALLOWED IN LONE WOLF.",
+                "THIRD PARTY APPLICATION ARE NOT ALLOWED.",
+                "MULTIPLE ACCOUNTS ARE NOT ALLOWED.",
+                "SCREEN RECORDING MUST BE ON WHILE PLAYING GAMERZADDA.",
+                "ABUSING IN CUSTOM CHAT IS STRICTLY PROHIBITED.",
               ].map((rule, index) => (
                 <div
                   key={`${rule}-${index}`}
@@ -2208,6 +2185,8 @@ export default function TournamentPage() {
                   ? "How To Play"
                   : popup === "rules"
                   ? "Match Rules"
+                  : popup === "participants"
+                  ? "Participants"
                   : "Join Tournament"}
               </h3>
             </div>
@@ -2235,6 +2214,31 @@ export default function TournamentPage() {
                   <Rule text="Teaming with other players is prohibited." />
                   <Rule text="Cheating or unfair play may result in disqualification." />
                   <Rule text={`${bonusUsablePercent}% bonus is usable for this match.`} />
+                </div>
+              )}
+
+              {/* PARTICIPANTS ACCESS */}
+              {popup === "participants" && (
+                <div className="py-5 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-red-500">
+                    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                      <circle cx="9" cy="7" r="4" />
+                      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                  </div>
+                  <h4 className="text-base font-black text-gray-900">Only Joined Users Can View Participants</h4>
+                  <p className="mt-1.5 text-xs font-semibold leading-5 text-gray-500">Join this tournament first to view the participants list.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPopup(null);
+                      openJoinPopup();
+                    }}
+                    className="mt-4 w-full rounded-xl bg-[#ff174f] py-3 text-xs font-black text-white shadow-lg"
+                  >
+                    JOIN TO VIEW PARTICIPANTS
+                  </button>
                 </div>
               )}
 
@@ -2414,7 +2418,7 @@ export default function TournamentPage() {
                               value={uid}
                               maxLength={15}
                               autoComplete="off"
-                              placeholder="Enter Free Fire UID"
+                              placeholder="Enter lonewolf UID"
                               onChange={(e) => handleUidChange(e.target.value)}
                               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                             />
@@ -2520,7 +2524,7 @@ export default function TournamentPage() {
                               value={uid}
                               maxLength={15}
                               autoComplete="off"
-                              placeholder="Enter Free Fire UID"
+                              placeholder="Enter lonewolf UID"
                               onChange={(e) => handleUidChange(e.target.value)}
                               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                             />
@@ -2596,7 +2600,7 @@ export default function TournamentPage() {
                           value={uid}
                           maxLength={15}
                           autoComplete="off"
-                          placeholder="Enter Free Fire UID"
+                          placeholder="Enter lonewolf UID"
                           onChange={(e) => handleUidChange(e.target.value)}
                           className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                         />

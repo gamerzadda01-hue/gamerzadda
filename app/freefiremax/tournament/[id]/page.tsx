@@ -1411,7 +1411,7 @@ export default function TournamentPage() {
               <div className="min-w-0">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-[#ff174f]/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-[#ff174f]">
-                    Free Fire
+                    FREE FIRE MAX
                   </span>
                   <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-gray-500">
                     {tournament.mode || "Solo"}
@@ -2414,7 +2414,7 @@ export default function TournamentPage() {
                               value={uid}
                               maxLength={15}
                               autoComplete="off"
-                              placeholder="Enter Free Fire UID"
+                              placeholder="Enter FREE FIRE MAX UID"
                               onChange={(e) => handleUidChange(e.target.value)}
                               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                             />
@@ -2520,7 +2520,7 @@ export default function TournamentPage() {
                               value={uid}
                               maxLength={15}
                               autoComplete="off"
-                              placeholder="Enter Free Fire UID"
+                              placeholder="Enter FREE FIRE MAX UID"
                               onChange={(e) => handleUidChange(e.target.value)}
                               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                             />
@@ -2596,7 +2596,7 @@ export default function TournamentPage() {
                           value={uid}
                           maxLength={15}
                           autoComplete="off"
-                          placeholder="Enter Free Fire UID"
+                          placeholder="Enter FREE FIRE MAX UID"
                           onChange={(e) => handleUidChange(e.target.value)}
                           className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
                         />

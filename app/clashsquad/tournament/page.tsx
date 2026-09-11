@@ -34,7 +34,7 @@ function formatStartTime(value: string | null) {
   });
 }
 
-export default function FreeFirePage() {
+export default function ClashSquadPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("SOLO");
   const [navActive, setNavActive] = useState<"matches" | "home" | "support">("home");
@@ -62,7 +62,7 @@ export default function FreeFirePage() {
     return mode === activeTab.toLowerCase();
   });
 
-  // LOAD FREE FIRE BANNERS
+  // LOAD CLASH SQUAD BANNERS
   useEffect(() => {
     async function loadBanners() {
       setBannersLoading(true);
@@ -70,12 +70,12 @@ export default function FreeFirePage() {
         .from("banners")
         .select("id,image_url,click_url,title")
         .eq("is_active", true)
-        .eq("game_type", "freefire")
+        .eq("game_type", "clashsquad")
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: false });
 
       if (error) {
-        console.error("Free Fire banners:", error);
+        console.error("Clash Squad banners:", error);
         setDbBanners([]);
       } else {
         setDbBanners(data || []);
@@ -119,7 +119,7 @@ export default function FreeFirePage() {
           const status = String(item.status ?? "").trim().toLowerCase();
 
           return (
-            (game === "free fire" || game === "free fire max") &&
+            (game === "clash squad" || game === "clashsquad") &&
             status === "upcoming"
           );
         });
@@ -191,13 +191,13 @@ export default function FreeFirePage() {
           status: item.status || "upcoming",
         }));
 
-        console.log("FREE FIRE TOURNAMENTS AFTER FILTER:", mapped);
+        console.log("CLASH SQUAD TOURNAMENTS AFTER FILTER:", mapped);
 
         if (!cancelled) {
           setTournaments(mapped);
         }
       } catch (error) {
-        console.error("Free Fire tournaments:", error);
+        console.error("Clash Squad tournaments:", error);
 
         if (!cancelled) {
           setTournamentError(
@@ -248,7 +248,7 @@ export default function FreeFirePage() {
           const status = String(item.status || "").trim().toLowerCase();
 
           return (
-            game === "free fire" &&
+            (game === "clash squad" || game === "clashsquad") &&
             status === "upcoming"
           );
         });
@@ -321,10 +321,10 @@ export default function FreeFirePage() {
           status: item.status || "upcoming",
         }));
 
-        console.log("FREE FIRE TOURNAMENTS AFTER FILTER:", mapped);
+        console.log("CLASH SQUAD TOURNAMENTS AFTER FILTER:", mapped);
         setTournaments(mapped);
       } catch (error) {
-        console.error("Free Fire tournaments:", error);
+        console.error("Clash Squad tournaments:", error);
         setTournaments([]);
       } finally {
         setTournamentsLoading(false);
@@ -391,7 +391,7 @@ export default function FreeFirePage() {
           </button>
 
           <h1 className="text-lg font-black tracking-wide">
-            FREE FIRE
+            CLASH SQUAD
           </h1>
 
         </div>
@@ -449,7 +449,7 @@ export default function FreeFirePage() {
             <div className="h-full w-full animate-pulse rounded-2xl bg-gray-200" />
           ) : dbBanners.length === 0 ? (
             <div className="flex h-full w-full items-center justify-center rounded-2xl bg-gray-200 text-xs font-bold text-gray-500">
-              No Free Fire banners available
+              No Clash Squad banners available
             </div>
           ) : (
             <>
@@ -473,7 +473,7 @@ export default function FreeFirePage() {
                   >
                     <img
                       src={item.image_url}
-                      alt={item.title || "Free Fire banner"}
+                      alt={item.title || "Clash Squad banner"}
                       className="h-full w-full rounded-2xl object-cover"
                       loading={index === 0 ? "eager" : "lazy"}
                       decoding="async"
@@ -894,7 +894,7 @@ function TournamentCard({
           >
             <img
               src="/freefire-icon.png"
-              alt="Free Fire"
+              alt="Clash Squad"
               className="h-10 w-10 object-contain"
             />
           </div>
@@ -904,7 +904,7 @@ function TournamentCard({
               {!isDuo && (
                 <>
                   <span className="text-[8px] font-black uppercase tracking-wide text-[#ff174f]">
-                    FREE FIRE
+                    CLASH SQUAD
                   </span>
 
                   <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[7px] font-black uppercase text-gray-500">
@@ -1064,7 +1064,7 @@ function TournamentCard({
       <button
         type="button"
         onClick={() => {
-          window.location.href = `/freefire/tournament/${tournament.id}`;
+          window.location.href = `/clashsquad/tournament/${tournament.id}`;
         }}
         className={`w-full py-2.5 text-[11px] font-black tracking-wide text-white transition-all active:scale-[0.99] ${
           isDuo
