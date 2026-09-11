@@ -556,9 +556,20 @@ export default function Home() {
                 />
               </DrawerGroup>
 
+              <DrawerGroup title="REWARDS">
+                <DrawerItem
+                  icon="🎁"
+                  text="My Referrals"
+                  onClick={() => {
+                    setDrawer(false);
+                    router.push("/referrals");
+                  }}
+                />
+              </DrawerGroup>
+
               <DrawerGroup title="GAMING">
                 <DrawerItem icon="🏆" text="Leaderboard" />
-                <DrawerItem icon="📊" text="My Stats" />
+                <DrawerItem icon="📊" text="My Stats" onClick={() => { setDrawer(false); router.push("/stats"); }} />
               </DrawerGroup>
 
               <DrawerGroup title="SUPPORT & SETTINGS">

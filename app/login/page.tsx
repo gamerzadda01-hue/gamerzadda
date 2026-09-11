@@ -24,7 +24,7 @@ export default function LoginPage() {
 
 
   return (
-    <Suspense fallback={<div style={{ minHeight: "100vh", background: "#050507" }} />}>
+    <Suspense fallback={<div style={{ minHeight: "100dvh", background: "#050507" }} />}>
       <LoginPageContent />
     </Suspense>
   );
@@ -333,14 +333,17 @@ function LoginPageContent() {
 
   return (
     <main
+      className="gz-login-main"
       style={{
         minHeight: "100vh",
+        position: "relative",
+        overflow: "hidden",
         background:
           "radial-gradient(circle at 50% 0%, rgba(255, 23, 79, 0.14) 0%, rgba(214, 255, 229, 0.72) 38%, #ffffff 78%)",
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        padding: "24px",
+        padding: "12px",
         color: "#17211b",
       }}
     >
@@ -353,6 +356,57 @@ function LoginPageContent() {
       </div>
 
 <style>{`
+        .gz-login-main {
+          position: relative !important;
+          min-height: 100vh !important;
+          width: 100% !important;
+          display: flex !important;
+          justify-content: center !important;
+          align-items: center !important;
+          box-sizing: border-box !important;
+        }
+
+        .gz-login-main .gz-bg-cut {
+          position: absolute !important;
+          inset: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          pointer-events: none !important;
+          z-index: 0 !important;
+        }
+
+        .gz-login-main .gz-login-card {
+          position: relative !important;
+          z-index: 5 !important;
+          flex: 0 0 auto !important;
+          margin: 0 auto !important;
+          transform: none;
+        }
+
+
+        .gz-login-main {
+          position: fixed !important;
+          inset: 0 !important;
+          width: 100vw !important;
+          height: 100dvh !important;
+          min-height: 100dvh !important;
+          margin: 0 !important;
+          padding: 12px !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          box-sizing: border-box !important;
+          overflow: auto !important;
+        }
+
+        .gz-login-card {
+          flex: 0 0 auto !important;
+          width: 340px !important;
+          max-width: calc(100vw - 24px) !important;
+          margin: 0 !important;
+          box-sizing: border-box !important;
+        }
+
         .gz-login-card {
           position: relative;
           overflow: hidden;
@@ -367,6 +421,45 @@ function LoginPageContent() {
           0%, 100% { transform: translateY(0); }
           50% { transform: translateY(-5px); }
         }
+
+        @media (max-width: 480px) {
+          .gz-login-main {
+            min-height: 100dvh !important;
+            height: 100dvh !important;
+            width: 100% !important;
+            padding: 8px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: hidden !important;
+          }
+
+          .gz-login-card {
+            width: min(88vw, 330px) !important;
+            max-width: 330px !important;
+            margin: 0 auto !important;
+            padding: 15px !important;
+            border-radius: 17px !important;
+            transform: none !important;
+          }
+
+          .gz-login-card .gz-red-half {
+            border-radius: 17px 17px 45% 45% / 17px 17px 18% 18% !important;
+          }
+        }
+
+        @media (max-height: 700px) and (max-width: 480px) {
+          .gz-login-main {
+            padding: 6px !important;
+          }
+
+          .gz-login-card {
+            width: min(90vw, 325px) !important;
+            max-width: 325px !important;
+            padding: 12px !important;
+          }
+        }
+
         @keyframes gzCardGlow {
           0%, 100% { box-shadow: 0 24px 70px rgba(20,60,40,.14), 0 0 22px rgba(220,38,38,.10), inset 0 1px 0 rgba(255,255,255,.95); }
           50% { box-shadow: 0 30px 82px rgba(20,60,40,.20), 0 0 42px rgba(220,38,38,.25), inset 0 1px 0 rgba(255,255,255,.98); }
@@ -377,13 +470,13 @@ function LoginPageContent() {
         className="gz-login-card"
         style={{
           width: "100%",
-          maxWidth: "430px",
+          maxWidth: "360px",
           background: "rgba(255,255,255,.92)",
           backdropFilter: "blur(28px) saturate(145%)",
           WebkitBackdropFilter: "blur(28px) saturate(145%)",
           border: "1px solid rgba(255, 23, 79, .16)",
-          borderRadius: "22px",
-          padding: "30px",
+          borderRadius: "18px",
+          padding: "18px",
           boxShadow: "0 24px 70px rgba(20, 60, 40, .14), inset 0 1px 0 rgba(255,255,255,.95)",
         }}
       >
@@ -392,13 +485,13 @@ function LoginPageContent() {
           aria-hidden="true"
           style={{
             position: "absolute",
-            zIndex: 1,
+            zIndex: 0,
             top: 0,
             left: 0,
             width: "100%",
-            height: "47%",
+            height: "43%",
             background: "linear-gradient(135deg, #7f1d1d 0%, #b91c1c 48%, #ef4444 100%)",
-            borderRadius: "22px 22px 50% 50% / 22px 22px 24% 24%",
+            borderRadius: "22px 22px 50% 50% / 22px 22px 18% 18%",
             boxShadow: "0 14px 35px rgba(185,28,28,.30)",
             pointerEvents: "none",
           }}
@@ -443,7 +536,7 @@ function LoginPageContent() {
             <span
                       /* LOGIN ANIMATION ICON */
                       style={{
-                        width: 160, height: 160,
+                        width: 105, height: 105,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -482,12 +575,12 @@ function LoginPageContent() {
 
           <p
             style={{
-              color: "rgba(255,255,255,0.92)",
+              color: "#26352c",
               margin: "7px 0 0",
               fontSize: "13px",
               lineHeight: 1.35,
-              fontWeight: 700,
-              textShadow: "0 1px 7px rgba(0,0,0,0.24)",
+              fontWeight: 800,
+              textShadow: "none",
               position: "relative",
               zIndex: 5,
             }}
@@ -814,6 +907,7 @@ Thank you.`;
                   minHeight: 36,
                   padding: "0 10px",
                   borderRadius: 10,
+                  whiteSpace: "nowrap",
                   background: "linear-gradient(135deg, #2563eb, #3b82f6)",
                   color: "#ffffff",
                   fontSize: 12,

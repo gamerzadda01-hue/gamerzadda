@@ -22,12 +22,29 @@ type Member = {
   device_user_agent?: string | null;
   last_login_at?: string | null;
   device_changed_at?: string | null;
+  daily_free_fire_limit?: number | null;
+  daily_free_fire_max_limit?: number | null;
+  daily_clash_squad_limit?: number | null;
+  daily_lone_wolf_limit?: number | null;
 };
 
 type Wallet = {
   deposit_balance: number | null;
   bonus_balance: number | null;
   winning_balance: number | null;
+};
+
+type ReferralSettings = {
+  id?: string;
+  signup_bonus: number;
+  referrer_signup_reward_min: number;
+  referrer_signup_reward_max: number;
+  referred_signup_reward_min: number;
+  referred_signup_reward_max: number;
+  tournament_reward_min: number;
+  tournament_reward_max: number;
+  first_deposit_percent: number;
+  is_active: boolean;
 };
 
 export default function MembersPage() {
@@ -48,10 +65,180 @@ export default function MembersPage() {
   const [memberDetail, setMemberDetail] = useState<any>(null);
   const [referral, setReferral] = useState<any>(null);
   const [loginHistory, setLoginHistory] = useState<any[]>([]);
+  const [statusAction, setStatusAction] = useState<"block" | "unblock" | "restrict" | "unrestrict" | null>(null);
+  const [statusReason, setStatusReason] = useState("");
+  const [restrictionDays, setRestrictionDays] = useState("7");
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [savingMatchLimits, setSavingMatchLimits] = useState(false);
+  const [matchLimitMessage, setMatchLimitMessage] = useState("");
+  const [matchLimits, setMatchLimits] = useState({
+    freeFire: "",
+    freeFireMax: "",
+    clashSquad: "",
+    loneWolf: "",
+  });
+
+  const [referralSettings, setReferralSettings] = useState<ReferralSettings>({
+    signup_bonus: 20,
+    referrer_signup_reward_min: 30,
+    referrer_signup_reward_max: 60,
+    referred_signup_reward_min: 30,
+    referred_signup_reward_max: 50,
+    tournament_reward_min: 20,
+    tournament_reward_max: 40,
+    first_deposit_percent: 10,
+    is_active: true,
+  });
+  const [referralSettingsLoading, setReferralSettingsLoading] = useState(false);
+  const [referralSettingsSaving, setReferralSettingsSaving] = useState(false);
+  const [referralSettingsMessage, setReferralSettingsMessage] = useState("");
 
   useEffect(() => {
     loadMembers();
+    loadReferralSettings();
   }, []);
+
+  async function loadReferralSettings() {
+    setReferralSettingsLoading(true);
+    setReferralSettingsMessage("");
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Admin login required.");
+
+      const response = await fetch("/api/admin/referral-settings", {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const raw = await response.text();
+      const result = raw ? JSON.parse(raw) : null;
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to load referral settings.");
+      }
+
+      if (result.settings) {
+        setReferralSettings({
+          signup_bonus: Number(result.settings.signup_bonus ?? 20),
+          referrer_signup_reward_min: Number(result.settings.referrer_signup_reward_min ?? 30),
+          referrer_signup_reward_max: Number(result.settings.referrer_signup_reward_max ?? 60),
+          referred_signup_reward_min: Number(result.settings.referred_signup_reward_min ?? 30),
+          referred_signup_reward_max: Number(result.settings.referred_signup_reward_max ?? 50),
+          tournament_reward_min: Number(result.settings.tournament_reward_min ?? 20),
+          tournament_reward_max: Number(result.settings.tournament_reward_max ?? 40),
+          first_deposit_percent: Number(result.settings.first_deposit_percent ?? 10),
+          is_active: Boolean(result.settings.is_active),
+          id: result.settings.id,
+        });
+      }
+    } catch (err: any) {
+      console.error(err);
+      setReferralSettingsMessage(err?.message || "Unable to load referral settings.");
+    } finally {
+      setReferralSettingsLoading(false);
+    }
+  }
+
+  function validateMoneyRange(label: string, min: number, max: number) {
+    if (!Number.isFinite(min) || min < 0 || min > 100000) {
+      throw new Error(`${label} minimum must be between ₹0 and ₹100000.`);
+    }
+    if (!Number.isFinite(max) || max < 0 || max > 100000) {
+      throw new Error(`${label} maximum must be between ₹0 and ₹100000.`);
+    }
+    if (min > max) {
+      throw new Error(`${label} minimum cannot be greater than maximum.`);
+    }
+  }
+
+  async function saveReferralSettings() {
+    try {
+      const signupBonus = Number(referralSettings.signup_bonus);
+      const referrerMin = Number(referralSettings.referrer_signup_reward_min);
+      const referrerMax = Number(referralSettings.referrer_signup_reward_max);
+      const referredMin = Number(referralSettings.referred_signup_reward_min);
+      const referredMax = Number(referralSettings.referred_signup_reward_max);
+      const tournamentMin = Number(referralSettings.tournament_reward_min);
+      const tournamentMax = Number(referralSettings.tournament_reward_max);
+      const depositPercent = Number(referralSettings.first_deposit_percent);
+
+      if (!Number.isFinite(signupBonus) || signupBonus < 0 || signupBonus > 100000) {
+        throw new Error("Signup bonus must be between ₹0 and ₹100000.");
+      }
+      validateMoneyRange("Referrer signup reward", referrerMin, referrerMax);
+      validateMoneyRange("Referred user signup reward", referredMin, referredMax);
+      validateMoneyRange("First tournament reward", tournamentMin, tournamentMax);
+
+      if (!Number.isFinite(depositPercent) || depositPercent < 0 || depositPercent > 100) {
+        throw new Error("First deposit percentage must be between 0% and 100%.");
+      }
+
+      const values = [signupBonus, referrerMin, referrerMax, referredMin, referredMax, tournamentMin, tournamentMax, depositPercent];
+      if (values.some((value) => Math.round(value * 100) / 100 !== value)) {
+        throw new Error("Maximum 2 decimal places allowed.");
+      }
+
+      setReferralSettingsSaving(true);
+      setReferralSettingsMessage("");
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Admin login required.");
+
+      const response = await fetch("/api/admin/referral-settings", {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          signup_bonus: signupBonus,
+          referrer_signup_reward_min: referrerMin,
+          referrer_signup_reward_max: referrerMax,
+          referred_signup_reward_min: referredMin,
+          referred_signup_reward_max: referredMax,
+          tournament_reward_min: tournamentMin,
+          tournament_reward_max: tournamentMax,
+          first_deposit_percent: depositPercent,
+          is_active: referralSettings.is_active,
+        }),
+      });
+
+      const raw = await response.text();
+      const result = raw ? JSON.parse(raw) : null;
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to save referral settings.");
+      }
+
+      if (result.settings) {
+        setReferralSettings({
+          ...referralSettings,
+          ...result.settings,
+          signup_bonus: Number(result.settings.signup_bonus),
+          referrer_signup_reward_min: Number(result.settings.referrer_signup_reward_min),
+          referrer_signup_reward_max: Number(result.settings.referrer_signup_reward_max),
+          referred_signup_reward_min: Number(result.settings.referred_signup_reward_min),
+          referred_signup_reward_max: Number(result.settings.referred_signup_reward_max),
+          tournament_reward_min: Number(result.settings.tournament_reward_min),
+          tournament_reward_max: Number(result.settings.tournament_reward_max),
+          first_deposit_percent: Number(result.settings.first_deposit_percent),
+          is_active: Boolean(result.settings.is_active),
+        });
+      }
+
+      setReferralSettingsMessage("Referral settings saved successfully.");
+    } catch (err: any) {
+      console.error(err);
+      setReferralSettingsMessage(err?.message || "Unable to save referral settings.");
+    } finally {
+      setReferralSettingsSaving(false);
+    }
+  }
 
   async function loadMembers() {
     setLoading(true);
@@ -142,6 +329,14 @@ export default function MembersPage() {
       setMemberDetail(result.member || null);
       setReferral(result.referral || null);
       setLoginHistory(result.loginHistory || []);
+      const m = result.member || member;
+      setMatchLimits({
+        freeFire: m.daily_free_fire_limit == null ? "" : String(m.daily_free_fire_limit),
+        freeFireMax: m.daily_free_fire_max_limit == null ? "" : String(m.daily_free_fire_max_limit),
+        clashSquad: m.daily_clash_squad_limit == null ? "" : String(m.daily_clash_squad_limit),
+        loneWolf: m.daily_lone_wolf_limit == null ? "" : String(m.daily_lone_wolf_limit),
+      });
+      setMatchLimitMessage("");
     } catch (err) {
       console.error(err);
       setWallet(null);
@@ -205,6 +400,188 @@ export default function MembersPage() {
       setActionMessage(err?.message || "Unable to change wallet.");
     } finally {
       setSavingWallet(false);
+    }
+  }
+
+  function normalizedStatus(member: Member | null) {
+    return String(member?.status || "active").trim().toLowerCase();
+  }
+
+  async function changeMemberStatus(
+    action: "block" | "unblock" | "restrict" | "unrestrict"
+  ) {
+    if (!selectedMember) return;
+
+    if ((action === "block" || action === "restrict") && !statusReason.trim()) {
+      setActionMessage("Please enter a reason.");
+      return;
+    }
+
+    if (action === "restrict") {
+      const days = Number(restrictionDays);
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        setActionMessage("Restriction duration must be between 1 and 365 days.");
+        return;
+      }
+    }
+
+    setStatusSaving(true);
+    setActionMessage("");
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Admin login required.");
+
+      const body: any = {
+        userId: selectedMember.id,
+        action,
+        reason: statusReason.trim() || null,
+      };
+
+      if (action === "restrict") {
+        body.durationDays = Number(restrictionDays);
+      }
+
+      const response = await fetch("/api/admin/members", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+
+      const raw = await response.text();
+      let result: any = null;
+
+      try {
+        result = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(raw || "Unable to update member status.");
+      }
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to update member status.");
+      }
+
+      const nextStatus =
+        action === "block"
+          ? "blocked"
+          : action === "restrict"
+            ? "restricted"
+            : "active";
+
+      setMembers((old) =>
+        old.map((m) =>
+          m.id === selectedMember.id ? { ...m, status: nextStatus } : m
+        )
+      );
+
+      setSelectedMember((old) =>
+        old ? { ...old, status: nextStatus } : old
+      );
+
+      setStatusAction(null);
+      setStatusReason("");
+      setActionMessage(
+        action === "block"
+          ? "Member blocked successfully."
+          : action === "restrict"
+            ? "Member restricted successfully."
+            : action === "unblock"
+              ? "Member unblocked successfully."
+              : "Member unrestricted successfully."
+      );
+
+      await loadMembers();
+    } catch (err: any) {
+      console.error(err);
+      setActionMessage(err?.message || "Unable to update member status.");
+    } finally {
+      setStatusSaving(false);
+    }
+  }
+
+  async function saveMatchLimits() {
+    if (!selectedMember) return;
+
+    const fields = [
+      ["Free Fire", matchLimits.freeFire],
+      ["Free Fire MAX", matchLimits.freeFireMax],
+      ["Clash Squad", matchLimits.clashSquad],
+      ["Lone Wolf", matchLimits.loneWolf],
+    ] as const;
+
+    const parsed: Record<string, number | null> = {};
+
+    for (const [name, value] of fields) {
+      const clean = value.trim();
+      if (clean === "") continue;
+      if (!/^\d+$/.test(clean)) {
+        setMatchLimitMessage(`${name}: enter a whole number or leave blank for Unlimited.`);
+        return;
+      }
+      const n = Number(clean);
+      if (!Number.isSafeInteger(n) || n < 0 || n > 10000) {
+        setMatchLimitMessage(`${name}: limit must be between 0 and 10000.`);
+        return;
+      }
+    }
+
+    parsed.daily_free_fire_limit = matchLimits.freeFire.trim() === "" ? null : Number(matchLimits.freeFire);
+    parsed.daily_free_fire_max_limit = matchLimits.freeFireMax.trim() === "" ? null : Number(matchLimits.freeFireMax);
+    parsed.daily_clash_squad_limit = matchLimits.clashSquad.trim() === "" ? null : Number(matchLimits.clashSquad);
+    parsed.daily_lone_wolf_limit = matchLimits.loneWolf.trim() === "" ? null : Number(matchLimits.loneWolf);
+
+    setSavingMatchLimits(true);
+    setMatchLimitMessage("");
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Admin login required.");
+
+      const response = await fetch("/api/admin/members", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          userId: selectedMember.id,
+          action: "update_match_limits",
+          ...parsed,
+        }),
+      });
+
+      const raw = await response.text();
+      const result = raw ? JSON.parse(raw) : null;
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to save match limits.");
+      }
+
+      const updated = result.member || {};
+      setSelectedMember((old) => old ? {
+        ...old,
+        daily_free_fire_limit: updated.daily_free_fire_limit,
+        daily_free_fire_max_limit: updated.daily_free_fire_max_limit,
+        daily_clash_squad_limit: updated.daily_clash_squad_limit,
+        daily_lone_wolf_limit: updated.daily_lone_wolf_limit,
+      } : old);
+      setMembers((old) => old.map((m) => m.id === selectedMember.id ? {
+        ...m,
+        daily_free_fire_limit: updated.daily_free_fire_limit,
+        daily_free_fire_max_limit: updated.daily_free_fire_max_limit,
+        daily_clash_squad_limit: updated.daily_clash_squad_limit,
+        daily_lone_wolf_limit: updated.daily_lone_wolf_limit,
+      } : m));
+      setMatchLimitMessage("Daily match limits saved successfully.");
+    } catch (err: any) {
+      setMatchLimitMessage(err?.message || "Unable to save match limits.");
+    } finally {
+      setSavingMatchLimits(false);
     }
   }
 
@@ -364,6 +741,122 @@ export default function MembersPage() {
 
         .refresh:hover {
           background: #172334;
+        }
+
+        .referral-settings {
+          margin-bottom: 18px;
+          padding: 15px;
+          border: 1px solid #1d2a3b;
+          border-radius: 10px;
+          background: #0d1520;
+        }
+
+        .referral-settings-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+
+        .referral-settings-title {
+          color: #fff;
+          font-size: 12px;
+          font-weight: 900;
+        }
+
+        .referral-settings-subtitle {
+          margin-top: 4px;
+          color: #68778c;
+          font-size: 8px;
+          line-height: 1.45;
+        }
+
+        .referral-toggle {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          color: #8ed8ae;
+          font-size: 9px;
+          font-weight: 900;
+          white-space: nowrap;
+          cursor: pointer;
+        }
+
+        .referral-toggle input {
+          width: 16px;
+          height: 16px;
+          accent-color: #ef1638;
+        }
+
+        .referral-settings-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .referral-setting-card {
+          padding: 10px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #101925;
+        }
+
+        .referral-setting-label {
+          color: #718096;
+          font-size: 8px;
+          font-weight: 800;
+          line-height: 1.35;
+          min-height: 22px;
+        }
+
+        .referral-setting-input {
+          width: 100%;
+          height: 34px;
+          margin-top: 6px;
+          box-sizing: border-box;
+          border: 1px solid #263448;
+          border-radius: 7px;
+          background: #0d1520;
+          color: #fff;
+          padding: 0 9px;
+          font-size: 10px;
+          outline: none;
+        }
+
+        .referral-setting-input:focus {
+          border-color: #ef1638;
+        }
+
+        .referral-setting-help {
+          margin-top: 8px;
+          color: #65748a;
+          font-size: 8px;
+          line-height: 1.45;
+        }
+
+        .referral-settings-save {
+          width: 100%;
+          height: 37px;
+          margin-top: 10px;
+          border: 0;
+          border-radius: 7px;
+          background: #ef1638;
+          color: #fff;
+          font-size: 10px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .referral-settings-save:disabled {
+          opacity: .55;
+          cursor: not-allowed;
+        }
+
+        .referral-settings-message {
+          margin-top: 7px;
+          color: #8ed8ae;
+          font-size: 9px;
         }
 
         .toolbar {
@@ -647,6 +1140,67 @@ export default function MembersPage() {
           font-size: 10px;
           font-weight: 700;
           word-break: break-word;
+        }
+
+.match-limit-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+
+        .match-limit-card {
+          padding: 10px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
+        }
+
+        .match-limit-label {
+          color: #647186;
+          font-size: 8px;
+          font-weight: 800;
+          margin-bottom: 6px;
+        }
+
+        .match-limit-input {
+          width: 100%;
+          height: 34px;
+          box-sizing: border-box;
+          border: 1px solid #263448;
+          border-radius: 7px;
+          background: #101925;
+          color: #fff;
+          padding: 0 9px;
+          font-size: 10px;
+          outline: none;
+        }
+
+        .match-limit-help {
+          margin-top: 7px;
+          color: #65748a;
+          font-size: 8px;
+          line-height: 1.45;
+        }
+
+        .match-limit-save {
+          width: 100%;
+          height: 36px;
+          margin-top: 9px;
+          border: 0;
+          border-radius: 7px;
+          background: #ef1638;
+          color: #fff;
+          font-size: 10px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .match-limit-save:disabled { opacity: .55; cursor: not-allowed; }
+
+        .match-limit-message {
+          margin-top: 7px;
+          color: #8ed8ae;
+          font-size: 9px;
         }
 
         .wallet-grid {
@@ -967,6 +1521,182 @@ export default function MembersPage() {
           text-align: center;
         }
 
+        .status-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+          margin-top: 10px;
+        }
+
+        .status-btn {
+          height: 38px;
+          border-radius: 8px;
+          font-size: 10px;
+          font-weight: 900;
+          cursor: pointer;
+          border: 1px solid transparent;
+        }
+
+        .status-btn.restrict {
+          background: rgba(245, 158, 11, 0.12);
+          color: #fbbf24;
+          border-color: rgba(245, 158, 11, 0.28);
+        }
+
+        .status-btn.block {
+          background: rgba(239, 22, 56, 0.12);
+          color: #ff647b;
+          border-color: rgba(239, 22, 56, 0.28);
+        }
+
+        .status-btn.unrestrict,
+        .status-btn.unblock {
+          background: rgba(40, 180, 110, 0.10);
+          color: #66d69b;
+          border-color: rgba(40, 180, 110, 0.22);
+        }
+
+        .status-btn:disabled {
+          opacity: .55;
+          cursor: not-allowed;
+        }
+
+        .status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 8px;
+          border-radius: 6px;
+          font-size: 8px;
+          font-weight: 900;
+          text-transform: uppercase;
+          border: 1px solid;
+        }
+
+        .status-badge.active {
+          color: #66d69b;
+          background: rgba(40, 180, 110, 0.08);
+          border-color: rgba(40, 180, 110, 0.18);
+        }
+
+        .status-badge.restricted {
+          color: #fbbf24;
+          background: rgba(245, 158, 11, 0.08);
+          border-color: rgba(245, 158, 11, 0.20);
+        }
+
+        .status-badge.blocked {
+          color: #ff647b;
+          background: rgba(239, 22, 56, 0.08);
+          border-color: rgba(239, 22, 56, 0.20);
+        }
+
+        .status-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 500;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          background: rgba(0, 0, 0, .72);
+        }
+
+        .status-modal {
+          width: 100%;
+          max-width: 390px;
+          padding: 20px;
+          border: 1px solid #2a394d;
+          border-radius: 14px;
+          background: #0b121c;
+          box-shadow: 0 25px 80px rgba(0,0,0,.55);
+        }
+
+        .status-modal-title {
+          margin: 0;
+          color: #fff;
+          font-size: 15px;
+          font-weight: 900;
+        }
+
+        .status-modal-subtitle {
+          margin-top: 5px;
+          color: #738197;
+          font-size: 9px;
+          line-height: 1.5;
+        }
+
+        .status-modal-label {
+          display: block;
+          margin: 16px 0 7px;
+          color: #68778c;
+          font-size: 8px;
+          font-weight: 900;
+          letter-spacing: 1px;
+          text-transform: uppercase;
+        }
+
+        .status-reason {
+          width: 100%;
+          min-height: 78px;
+          resize: vertical;
+          box-sizing: border-box;
+          border: 1px solid #263448;
+          border-radius: 8px;
+          background: #101925;
+          color: #fff;
+          padding: 10px;
+          font-size: 10px;
+          outline: none;
+        }
+
+        .status-days {
+          width: 100%;
+          height: 38px;
+          box-sizing: border-box;
+          border: 1px solid #263448;
+          border-radius: 8px;
+          background: #101925;
+          color: #fff;
+          padding: 0 10px;
+          font-size: 10px;
+          outline: none;
+        }
+
+        .status-modal-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+          margin-top: 14px;
+        }
+
+        .status-modal-cancel,
+        .status-modal-confirm {
+          height: 38px;
+          border-radius: 8px;
+          font-size: 10px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .status-modal-cancel {
+          border: 1px solid #263448;
+          background: #101925;
+          color: #c5cfdd;
+        }
+
+        .status-modal-confirm {
+          border: 0;
+          background: #ef1638;
+          color: #fff;
+        }
+
+        .status-modal-confirm:disabled,
+        .status-modal-cancel:disabled {
+          opacity: .55;
+          cursor: not-allowed;
+        }
+
         @media (max-width: 700px) {
           .members-page {
             padding: 16px;
@@ -992,6 +1722,15 @@ export default function MembersPage() {
             min-width: 0;
           }
 
+          .referral-settings-head {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .referral-settings-grid {
+            grid-template-columns: 1fr 1fr;
+          }
+
           .info-grid {
             grid-template-columns: 1fr;
           }
@@ -1000,7 +1739,68 @@ export default function MembersPage() {
             grid-column: auto;
           }
 
-          .wallet-grid {
+  .match-limit-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+
+        .match-limit-card {
+          padding: 10px;
+          border: 1px solid #1d2a3b;
+          border-radius: 8px;
+          background: #0e1723;
+        }
+
+        .match-limit-label {
+          color: #647186;
+          font-size: 8px;
+          font-weight: 800;
+          margin-bottom: 6px;
+        }
+
+        .match-limit-input {
+          width: 100%;
+          height: 34px;
+          box-sizing: border-box;
+          border: 1px solid #263448;
+          border-radius: 7px;
+          background: #101925;
+          color: #fff;
+          padding: 0 9px;
+          font-size: 10px;
+          outline: none;
+        }
+
+        .match-limit-help {
+          margin-top: 7px;
+          color: #65748a;
+          font-size: 8px;
+          line-height: 1.45;
+        }
+
+        .match-limit-save {
+          width: 100%;
+          height: 36px;
+          margin-top: 9px;
+          border: 0;
+          border-radius: 7px;
+          background: #ef1638;
+          color: #fff;
+          font-size: 10px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .match-limit-save:disabled { opacity: .55; cursor: not-allowed; }
+
+        .match-limit-message {
+          margin-top: 7px;
+          color: #8ed8ae;
+          font-size: 9px;
+        }
+
+        .wallet-grid {
             grid-template-columns: 1fr;
           }
         }
@@ -1023,6 +1823,65 @@ export default function MembersPage() {
             ↻ Refresh
           </button>
         </div>
+      </div>
+
+      <div className="referral-settings">
+        <div className="referral-settings-head">
+          <div>
+            <div className="referral-settings-title">Referral System Settings</div>
+            <div className="referral-settings-subtitle">
+              Global referral rewards. Signup bonus goes to Deposit Wallet; referral rewards follow the wallet rules configured for each milestone.
+            </div>
+          </div>
+          <label className="referral-toggle">
+            <input
+              type="checkbox"
+              checked={referralSettings.is_active}
+              onChange={(e) => setReferralSettings((v) => ({ ...v, is_active: e.target.checked }))}
+              disabled={referralSettingsLoading || referralSettingsSaving}
+            />
+            Referral System ON
+          </label>
+        </div>
+
+        <div className="referral-settings-grid">
+          <div className="referral-setting-card">
+            <div className="referral-setting-label">Normal Signup Bonus · Deposit Wallet</div>
+            <input className="referral-setting-input" type="number" min="0" max="100000" step="0.01" value={referralSettings.signup_bonus} onChange={(e) => setReferralSettings((v) => ({ ...v, signup_bonus: Number(e.target.value) }))} />
+          </div>
+
+          <div className="referral-setting-card">
+            <div className="referral-setting-label">Referrer Signup Reward · Bonus Wallet</div>
+            <input className="referral-setting-input" type="number" min="0" max="100000" step="0.01" value={referralSettings.referrer_signup_reward_min} onChange={(e) => setReferralSettings((v) => ({ ...v, referrer_signup_reward_min: Number(e.target.value) }))} placeholder="Min" />
+            <input className="referral-setting-input" type="number" min="0" max="100000" step="0.01" value={referralSettings.referrer_signup_reward_max} onChange={(e) => setReferralSettings((v) => ({ ...v, referrer_signup_reward_max: Number(e.target.value) }))} placeholder="Max" />
+          </div>
+
+          <div className="referral-setting-card">
+            <div className="referral-setting-label">Referred User Signup Reward · Bonus Wallet</div>
+            <input className="referral-setting-input" type="number" min="0" max="100000" step="0.01" value={referralSettings.referred_signup_reward_min} onChange={(e) => setReferralSettings((v) => ({ ...v, referred_signup_reward_min: Number(e.target.value) }))} placeholder="Min" />
+            <input className="referral-setting-input" type="number" min="0" max="100000" step="0.01" value={referralSettings.referred_signup_reward_max} onChange={(e) => setReferralSettings((v) => ({ ...v, referred_signup_reward_max: Number(e.target.value) }))} placeholder="Max" />
+          </div>
+
+          <div className="referral-setting-card">
+            <div className="referral-setting-label">First Tournament Reward · Bonus Wallet</div>
+            <input className="referral-setting-input" type="number" min="0" max="100000" step="0.01" value={referralSettings.tournament_reward_min} onChange={(e) => setReferralSettings((v) => ({ ...v, tournament_reward_min: Number(e.target.value) }))} placeholder="Min" />
+            <input className="referral-setting-input" type="number" min="0" max="100000" step="0.01" value={referralSettings.tournament_reward_max} onChange={(e) => setReferralSettings((v) => ({ ...v, tournament_reward_max: Number(e.target.value) }))} placeholder="Max" />
+          </div>
+
+          <div className="referral-setting-card">
+            <div className="referral-setting-label">First Deposit Reward · Referrer → Deposit Wallet</div>
+            <input className="referral-setting-input" type="number" min="0" max="100" step="0.01" value={referralSettings.first_deposit_percent} onChange={(e) => setReferralSettings((v) => ({ ...v, first_deposit_percent: Number(e.target.value) }))} />
+          </div>
+        </div>
+
+        <div className="referral-setting-help">
+          Referred user first deposit reward: same percentage goes to Bonus Wallet. Each signup, first tournament join, and first deposit milestone is rewarded only once by the backend.
+        </div>
+
+        <button className="referral-settings-save" onClick={saveReferralSettings} disabled={referralSettingsLoading || referralSettingsSaving}>
+          {referralSettingsSaving ? "Saving..." : referralSettingsLoading ? "Loading..." : "Save Referral Settings"}
+        </button>
+        {referralSettingsMessage && <div className="referral-settings-message">{referralSettingsMessage}</div>}
       </div>
 
       <div className="toolbar">
@@ -1178,22 +2037,98 @@ export default function MembersPage() {
                   </td>
 
                   <td>
-                    <span
-                      className={`status ${
-                        String(
-                          member.status || "active"
-                        ).toLowerCase() === "blocked"
-                          ? "blocked"
-                          : ""
-                      }`}
-                    >
-                      {member.status || "active"}
+                    <span className={`status-badge ${normalizedStatus(member)}`}>
+                      {normalizedStatus(member) === "blocked"
+                        ? "● Blocked"
+                        : normalizedStatus(member) === "restricted"
+                          ? "● Restricted"
+                          : "● Active"}
                     </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {statusAction && selectedMember && (
+        <div
+          className="status-modal-backdrop"
+          onClick={() => {
+            if (!statusSaving) setStatusAction(null);
+          }}
+        >
+          <div
+            className="status-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="status-modal-title">
+              {statusAction === "block" ? "Block User" : "Restrict User"}
+            </h3>
+
+            <div className="status-modal-subtitle">
+              {statusAction === "block"
+                ? "This will prevent the user from using the account. Existing sessions should also be invalidated by the server."
+                : "This will keep the user logged in but prevent restricted actions such as joining tournaments and earning/reward actions."}
+            </div>
+
+            <label className="status-modal-label">Reason</label>
+            <textarea
+              className="status-reason"
+              placeholder={
+                statusAction === "block"
+                  ? "Enter block reason..."
+                  : "Enter restriction reason..."
+              }
+              value={statusReason}
+              onChange={(e) => setStatusReason(e.target.value)}
+              disabled={statusSaving}
+            />
+
+            {statusAction === "restrict" && (
+              <>
+                <label className="status-modal-label">Restriction Duration</label>
+                <select
+                  className="status-days"
+                  value={restrictionDays}
+                  onChange={(e) => setRestrictionDays(e.target.value)}
+                  disabled={statusSaving}
+                >
+                  <option value="1">1 Day</option>
+                  <option value="3">3 Days</option>
+                  <option value="7">7 Days</option>
+                  <option value="15">15 Days</option>
+                  <option value="30">30 Days</option>
+                  <option value="90">90 Days</option>
+                  <option value="365">365 Days</option>
+                </select>
+              </>
+            )}
+
+            <div className="status-modal-actions">
+              <button
+                type="button"
+                className="status-modal-cancel"
+                disabled={statusSaving}
+                onClick={() => setStatusAction(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="status-modal-confirm"
+                disabled={statusSaving || !statusReason.trim()}
+                onClick={() => changeMemberStatus(statusAction)}
+              >
+                {statusSaving
+                  ? "Saving..."
+                  : statusAction === "block"
+                    ? "Confirm Block"
+                    : "Confirm Restrict"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1282,10 +2217,65 @@ export default function MembersPage() {
                   </div>
                 </div>
 
-                <div className="info">
-                  <div className="info-label">Status</div>
+                <div className="info full">
+                  <div className="info-label">Account Status</div>
                   <div className="info-value">
-                    {selectedMember.status || "active"}
+                    <span className={`status-badge ${normalizedStatus(selectedMember)}`}>
+                      {normalizedStatus(selectedMember) === "blocked"
+                        ? "● Blocked"
+                        : normalizedStatus(selectedMember) === "restricted"
+                          ? "● Restricted"
+                          : "● Active"}
+                    </span>
+
+                    <div className="status-actions">
+                      {normalizedStatus(selectedMember) === "blocked" ? (
+                        <button
+                          className="status-btn unblock"
+                          type="button"
+                          disabled={statusSaving}
+                          onClick={() => changeMemberStatus("unblock")}
+                        >
+                          {statusSaving ? "Updating..." : "✓ Unblock User"}
+                        </button>
+                      ) : (
+                        <button
+                          className="status-btn block"
+                          type="button"
+                          disabled={statusSaving}
+                          onClick={() => {
+                            setStatusAction("block");
+                            setStatusReason("");
+                          }}
+                        >
+                          🚫 Block User
+                        </button>
+                      )}
+
+                      {normalizedStatus(selectedMember) === "restricted" ? (
+                        <button
+                          className="status-btn unrestrict"
+                          type="button"
+                          disabled={statusSaving}
+                          onClick={() => changeMemberStatus("unrestrict")}
+                        >
+                          {statusSaving ? "Updating..." : "✓ Unrestrict"}
+                        </button>
+                      ) : (
+                        <button
+                          className="status-btn restrict"
+                          type="button"
+                          disabled={statusSaving}
+                          onClick={() => {
+                            setStatusAction("restrict");
+                            setStatusReason("");
+                            setRestrictionDays("7");
+                          }}
+                        >
+                          ⚠ Restrict User
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1460,6 +2450,33 @@ export default function MembersPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="section">
+              <div className="section-title">Daily Match Limits</div>
+              <div className="match-limit-grid">
+                <div className="match-limit-card">
+                  <div className="match-limit-label">Free Fire</div>
+                  <input className="match-limit-input" type="number" min="0" max="10000" step="1" placeholder="Unlimited" value={matchLimits.freeFire} onChange={(e) => setMatchLimits((v) => ({ ...v, freeFire: e.target.value }))} />
+                </div>
+                <div className="match-limit-card">
+                  <div className="match-limit-label">Free Fire MAX</div>
+                  <input className="match-limit-input" type="number" min="0" max="10000" step="1" placeholder="Unlimited" value={matchLimits.freeFireMax} onChange={(e) => setMatchLimits((v) => ({ ...v, freeFireMax: e.target.value }))} />
+                </div>
+                <div className="match-limit-card">
+                  <div className="match-limit-label">Clash Squad</div>
+                  <input className="match-limit-input" type="number" min="0" max="10000" step="1" placeholder="Unlimited" value={matchLimits.clashSquad} onChange={(e) => setMatchLimits((v) => ({ ...v, clashSquad: e.target.value }))} />
+                </div>
+                <div className="match-limit-card">
+                  <div className="match-limit-label">Lone Wolf</div>
+                  <input className="match-limit-input" type="number" min="0" max="10000" step="1" placeholder="Unlimited" value={matchLimits.loneWolf} onChange={(e) => setMatchLimits((v) => ({ ...v, loneWolf: e.target.value }))} />
+                </div>
+              </div>
+              <div className="match-limit-help">Blank = Unlimited · 0 = no joins · Limit resets automatically each day.</div>
+              <button className="match-limit-save" onClick={saveMatchLimits} disabled={savingMatchLimits}>
+                {savingMatchLimits ? "Saving..." : "Save Match Limits"}
+              </button>
+              {matchLimitMessage && <div className="match-limit-message">{matchLimitMessage}</div>}
             </div>
 
             <div className="section">

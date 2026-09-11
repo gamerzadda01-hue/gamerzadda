@@ -48,14 +48,20 @@ function generateSessionToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
-function generateReferralCode(): string {
-  return (
-    "GZ" +
-    crypto
-      .randomBytes(5)
-      .toString("hex")
-      .toUpperCase()
-  );
+function generateReferralCode(username: string): string {
+  const cleanUsername = String(username || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 7) || "USER";
+
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let random = "";
+
+  for (let i = 0; i < 3; i++) {
+    random += chars[crypto.randomInt(0, chars.length)];
+  }
+
+  return `GZADDA${cleanUsername}${random}`;
 }
 
 function getClientIP(request: NextRequest): string | null {
@@ -381,6 +387,90 @@ async function verifyOTP(
     success: true,
   }),
 };
+}
+
+
+function randomAmount(min: number, max: number): number {
+  const minPaise = Math.round(min * 100);
+  const maxPaise = Math.round(max * 100);
+  if (maxPaise <= minPaise) return minPaise / 100;
+  return crypto.randomInt(minPaise, maxPaise + 1) / 100;
+}
+
+async function getReferralSettings() {
+  const { data, error } = await supabaseAdmin
+    .from("referral_settings")
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Referral settings lookup error:", error);
+    throw new Error("REFERRAL_SETTINGS_FAILED");
+  }
+
+  return data;
+}
+
+async function addWalletBalance(
+  userId: string,
+  walletType: "deposit_balance" | "bonus_balance",
+  amount: number
+) {
+  if (!amount || amount <= 0) return;
+
+  const { data: wallet, error: walletError } = await supabaseAdmin
+    .from("wallet_balances")
+    .select("deposit_balance, bonus_balance, winning_balance")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (walletError) {
+    console.error("Wallet lookup error:", walletError);
+    throw new Error("WALLET_UPDATE_FAILED");
+  }
+
+  const current = Number(wallet?.[walletType] ?? 0);
+  const next = Number((current + amount).toFixed(2));
+
+  const { error: updateError } = await supabaseAdmin
+    .from("wallet_balances")
+    .upsert(
+      {
+        user_id: userId,
+        [walletType]: next,
+      },
+      { onConflict: "user_id" }
+    );
+
+  if (updateError) {
+    console.error("Wallet balance update error:", updateError);
+    throw new Error("WALLET_UPDATE_FAILED");
+  }
+}
+
+async function createWalletTransaction(
+  userId: string,
+  amount: number,
+  type: string,
+  description: string,
+  referenceId: string
+) {
+  const { error } = await supabaseAdmin
+    .from("wallet_transactions")
+    .insert({
+      user_id: userId,
+      amount,
+      type,
+      description,
+      reference_id: referenceId,
+    });
+
+  if (error) {
+    console.error("Wallet transaction insert error:", error);
+    throw new Error("WALLET_TRANSACTION_FAILED");
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -737,7 +827,7 @@ export async function POST(request: NextRequest) {
 
         for (let i = 0; i < 5; i++) {
           const candidate =
-            generateReferralCode();
+            generateReferralCode(pendingSignup.full_name);
 
           const {
             data: existingCode,
@@ -768,6 +858,59 @@ export async function POST(request: NextRequest) {
         }
 
         /*
+         * ==========================================
+         * REFERRAL VALIDATION
+         * ==========================================
+         * pending_signups stores the referral CODE.
+         * users.referred_by stores the REFERRER UUID.
+         */
+        let referrerId: string | null = null;
+
+        if (pendingSignup.referral_code) {
+          const { data: referrer, error: referrerError } =
+            await supabaseAdmin
+              .from("users")
+              .select("id, status, referral_code")
+              .eq("referral_code", String(pendingSignup.referral_code).toUpperCase())
+              .maybeSingle();
+
+          if (referrerError) {
+            console.error("Referral lookup error:", referrerError);
+            return NextResponse.json(
+              {
+                success: false,
+                message: "Unable to verify referral code.",
+              },
+              { status: 500 }
+            );
+          }
+
+          if (!referrer) {
+            return NextResponse.json(
+              {
+                success: false,
+                code: "INVALID_REFERRAL_CODE",
+                message: "Invalid referral code.",
+              },
+              { status: 400 }
+            );
+          }
+
+          if (referrer.status === "blocked") {
+            return NextResponse.json(
+              {
+                success: false,
+                code: "INVALID_REFERRAL_CODE",
+                message: "Invalid referral code.",
+              },
+              { status: 400 }
+            );
+          }
+
+          referrerId = referrer.id;
+        }
+
+        /*
          * Create actual user.
          */
 
@@ -788,8 +931,7 @@ export async function POST(request: NextRequest) {
             role: "user",
             wallet_balance: 0,
             referral_code: ownReferralCode,
-            referred_by:
-              pendingSignup.referral_code || null,
+            referred_by: referrerId,
             ip_address: clientIp,
             device_id: deviceId,
             device_user_agent: userAgent,
@@ -814,6 +956,143 @@ export async function POST(request: NextRequest) {
             },
             { status: 500 }
           );
+        }
+
+        /*
+         * ==========================================
+         * SIGNUP REWARDS
+         * ==========================================
+         * Every new user gets the normal signup bonus
+         * in Deposit Wallet.
+         *
+         * If referred:
+         * - referred user gets referral signup reward in Bonus Wallet
+         * - referrer gets referral signup reward in Bonus Wallet
+         * - referral relationship is recorded
+         * - reward milestone is protected by UNIQUE(referral_id,reward_type)
+         */
+        const referralSettings = await getReferralSettings();
+
+        if (!referralSettings) {
+          console.error("Referral settings not found.");
+          return NextResponse.json(
+            {
+              success: false,
+              message: "Unable to complete signup rewards.",
+            },
+            { status: 500 }
+          );
+        }
+
+        const normalSignupBonus = Number(referralSettings.signup_bonus || 0);
+        const referralActive = Boolean(referralSettings.is_active);
+
+        // Normal signup bonus applies to everyone.
+        if (normalSignupBonus > 0) {
+          await addWalletBalance(
+            newUser.id,
+            "deposit_balance",
+            normalSignupBonus
+          );
+
+          await createWalletTransaction(
+            newUser.id,
+            normalSignupBonus,
+            "signup_bonus",
+            "Signup bonus • Deposit balance",
+            newUser.id
+          );
+        }
+
+        if (referrerId && referralActive) {
+          const referrerReward = randomAmount(
+            Number(referralSettings.referrer_signup_reward_min || 0),
+            Number(referralSettings.referrer_signup_reward_max || 0)
+          );
+
+          const referredReward = randomAmount(
+            Number(referralSettings.referred_signup_reward_min || 0),
+            Number(referralSettings.referred_signup_reward_max || 0)
+          );
+
+          const { data: referral, error: referralError } =
+            await supabaseAdmin
+              .from("referrals")
+              .insert({
+                referrer_id: referrerId,
+                referred_user_id: newUser.id,
+                referral_code: String(pendingSignup.referral_code).toUpperCase(),
+              })
+              .select("id")
+              .single();
+
+          if (referralError || !referral) {
+            console.error("Referral creation error:", referralError);
+            return NextResponse.json(
+              {
+                success: false,
+                message: "Unable to complete referral signup.",
+              },
+              { status: 500 }
+            );
+          }
+
+          const { error: rewardInsertError } = await supabaseAdmin
+            .from("referral_rewards")
+            .insert({
+              referral_id: referral.id,
+              referrer_id: referrerId,
+              referred_user_id: newUser.id,
+              reward_type: "signup",
+              referrer_amount: referrerReward,
+              referred_amount: referredReward,
+              referrer_wallet: "bonus_balance",
+              referred_wallet: "bonus_balance",
+              reference_id: newUser.id,
+            });
+
+          if (rewardInsertError) {
+            console.error("Referral reward record error:", rewardInsertError);
+            return NextResponse.json(
+              {
+                success: false,
+                message: "Unable to complete referral signup.",
+              },
+              { status: 500 }
+            );
+          }
+
+          if (referrerReward > 0) {
+            await addWalletBalance(
+              referrerId,
+              "bonus_balance",
+              referrerReward
+            );
+
+            await createWalletTransaction(
+              referrerId,
+              referrerReward,
+              "referral_signup_reward",
+              "Referral signup reward • Bonus balance",
+              referral.id
+            );
+          }
+
+          if (referredReward > 0) {
+            await addWalletBalance(
+              newUser.id,
+              "bonus_balance",
+              referredReward
+            );
+
+            await createWalletTransaction(
+              newUser.id,
+              referredReward,
+              "referral_signup_reward",
+              "Referral signup reward • Bonus balance",
+              referral.id
+            );
+          }
         }
 
         // Delete pending signup

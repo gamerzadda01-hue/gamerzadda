@@ -36,6 +36,218 @@ async function getUserId() {
   return session.user_id;
 }
 
+
+async function processFirstTournamentReferralReward(
+  userId: string,
+  entryId: string,
+  tournamentId: string
+) {
+  try {
+    // Find referral relationship for this user.
+    const { data: referral, error: referralError } = await supabaseAdmin
+      .from("referrals")
+      .select("id,referrer_id,referred_user_id")
+      .eq("referred_user_id", userId)
+      .maybeSingle();
+
+    if (referralError) {
+      console.error("Referral lookup error:", referralError);
+      return;
+    }
+
+    if (!referral) return;
+
+    // One-time milestone: only the first successful tournament join
+    // can create this reward.
+    const { data: existingReward, error: rewardLookupError } =
+      await supabaseAdmin
+        .from("referral_rewards")
+        .select("id")
+        .eq("referral_id", referral.id)
+        .eq("reward_type", "first_tournament")
+        .maybeSingle();
+
+    if (rewardLookupError) {
+      console.error("Referral reward lookup error:", rewardLookupError);
+      return;
+    }
+
+    if (existingReward) return;
+
+    // Load latest admin settings.
+    const { data: settings, error: settingsError } = await supabaseAdmin
+      .from("referral_settings")
+      .select(
+        "tournament_reward_min,tournament_reward_max,is_active"
+      )
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (settingsError) {
+      console.error("Referral settings lookup error:", settingsError);
+      return;
+    }
+
+    if (!settings?.is_active) return;
+
+    const min = Number(settings.tournament_reward_min || 0);
+    const max = Number(settings.tournament_reward_max || 0);
+
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min) {
+      console.error("Invalid tournament referral reward settings.");
+      return;
+    }
+
+    // Random reward between admin-configured min and max, rounded to ₹1.
+    const rewardAmount =
+      Math.floor(Math.random() * (max - min + 1)) + min;
+
+    if (rewardAmount <= 0) return;
+
+    // Insert the milestone first. The UNIQUE(referral_id,reward_type)
+    // constraint prevents duplicate rewards from concurrent requests.
+    const { data: rewardRow, error: insertRewardError } =
+      await supabaseAdmin
+        .from("referral_rewards")
+        .insert({
+          referral_id: referral.id,
+          referrer_id: referral.referrer_id,
+          referred_user_id: referral.referred_user_id,
+          reward_type: "first_tournament",
+          referrer_amount: rewardAmount,
+          referred_amount: rewardAmount,
+          referrer_wallet: "bonus",
+          referred_wallet: "bonus",
+          reference_id: entryId,
+        })
+        .select("id")
+        .single();
+
+    if (insertRewardError || !rewardRow) {
+      // Unique constraint means another request already awarded it.
+      if (insertRewardError?.code === "23505") return;
+
+      console.error(
+        "First tournament referral reward record error:",
+        insertRewardError
+      );
+      return;
+    }
+
+    // Credit both users' bonus wallets.
+    const { data: referrerWallet } = await supabaseAdmin
+      .from("wallet_balances")
+      .select("bonus_balance")
+      .eq("user_id", referral.referrer_id)
+      .maybeSingle();
+
+    const { data: referredWallet } = await supabaseAdmin
+      .from("wallet_balances")
+      .select("bonus_balance")
+      .eq("user_id", referral.referred_user_id)
+      .maybeSingle();
+
+    if (!referrerWallet || !referredWallet) {
+      await supabaseAdmin
+        .from("referral_rewards")
+        .delete()
+        .eq("id", rewardRow.id);
+
+      console.error("Referral reward wallet not found.");
+      return;
+    }
+
+    const newReferrerBonus =
+      Math.round((Number(referrerWallet.bonus_balance || 0) + rewardAmount) * 100) /
+      100;
+
+    const newReferredBonus =
+      Math.round((Number(referredWallet.bonus_balance || 0) + rewardAmount) * 100) /
+      100;
+
+    const { data: updatedReferrer } = await supabaseAdmin
+      .from("wallet_balances")
+      .update({
+        bonus_balance: newReferrerBonus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", referral.referrer_id)
+      .select("user_id")
+      .maybeSingle();
+
+    const { data: updatedReferred } = await supabaseAdmin
+      .from("wallet_balances")
+      .update({
+        bonus_balance: newReferredBonus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", referral.referred_user_id)
+      .select("user_id")
+      .maybeSingle();
+
+    if (!updatedReferrer || !updatedReferred) {
+      // Best-effort rollback. A DB RPC/transaction can make this fully atomic.
+      if (updatedReferrer) {
+        await supabaseAdmin
+          .from("wallet_balances")
+          .update({
+            bonus_balance: Number(referrerWallet.bonus_balance || 0),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", referral.referrer_id);
+      }
+
+      if (updatedReferred) {
+        await supabaseAdmin
+          .from("wallet_balances")
+          .update({
+            bonus_balance: Number(referredWallet.bonus_balance || 0),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", referral.referred_user_id);
+      }
+
+      await supabaseAdmin
+        .from("referral_rewards")
+        .delete()
+        .eq("id", rewardRow.id);
+
+      console.error("First tournament referral wallet credit failed.");
+      return;
+    }
+
+    // Wallet transaction history for both credits.
+    const { error: txError } = await supabaseAdmin
+      .from("wallet_transactions")
+      .insert([
+        {
+          user_id: referral.referrer_id,
+          amount: rewardAmount,
+          type: "referral_reward",
+          description: `Referral reward • First tournament join`,
+          reference_id: rewardRow.id,
+        },
+        {
+          user_id: referral.referred_user_id,
+          amount: rewardAmount,
+          type: "referral_reward",
+          description: `Referral reward • First tournament join`,
+          reference_id: rewardRow.id,
+        },
+      ]);
+
+    if (txError) {
+      console.error("Referral reward transaction history error:", txError);
+      // Do not reverse the wallet credit here; the reward itself was
+      // successfully applied and the history failure is logged for repair.
+    }
+  } catch (error) {
+    // Referral reward failure must never cancel a successful tournament join.
+    console.error("First tournament referral reward error:", error);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const userId = await getUserId();
@@ -80,7 +292,7 @@ export async function POST(request: Request) {
       await supabaseAdmin
         .from("tournaments")
         .select(
-          "id,entry_fee,max_players,status,bonus_usable_percent"
+          "id,title,game,mode,entry_fee,max_players,status,bonus_usable_percent"
         )
         .eq("id", tournamentId)
         .maybeSingle();
@@ -92,6 +304,176 @@ export async function POST(request: Request) {
         { error: "Tournament not found." },
         { status: 404 }
       );
+    }
+
+    // =========================================================
+    // ACCOUNT STATUS + DAILY MATCH LIMIT ENFORCEMENT
+    // =========================================================
+    // Limits are stored per user:
+    // NULL = unlimited, 0 = no joins, positive number = max
+    // successful joins for that game type during the current
+    // India calendar day.
+    const { data: currentUser, error: currentUserError } =
+      await supabaseAdmin
+        .from("users")
+        .select(
+          "status,status_reason,restricted_until,daily_free_fire_limit,daily_free_fire_max_limit,daily_clash_squad_limit,daily_lone_wolf_limit"
+        )
+        .eq("id", userId)
+        .maybeSingle();
+
+    if (currentUserError) throw currentUserError;
+
+    if (!currentUser) {
+      return NextResponse.json(
+        { error: "User account not found." },
+        { status: 404 }
+      );
+    }
+
+    // Automatically restore an expired restriction.
+    if (
+      String(currentUser.status || "").toLowerCase() === "restricted" &&
+      currentUser.restricted_until &&
+      new Date(currentUser.restricted_until).getTime() <= Date.now()
+    ) {
+      await supabaseAdmin
+        .from("users")
+        .update({
+          status: "active",
+          status_reason: null,
+          status_updated_at: new Date().toISOString(),
+          restricted_until: null,
+        })
+        .eq("id", userId);
+
+      currentUser.status = "active";
+      currentUser.status_reason = null;
+      currentUser.restricted_until = null;
+    }
+
+    if (String(currentUser.status || "").toLowerCase() === "blocked") {
+      return NextResponse.json(
+        {
+          error: "Your account is blocked.",
+          code: "ACCOUNT_BLOCKED",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (String(currentUser.status || "").toLowerCase() === "restricted") {
+      return NextResponse.json(
+        {
+          error:
+            currentUser.status_reason ||
+            "Your account is restricted and cannot join tournaments.",
+          code: "ACCOUNT_RESTRICTED",
+          restrictedUntil: currentUser.restricted_until || null,
+        },
+        { status: 403 }
+      );
+    }
+
+    const normalizedGame = String(tournament.game || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[_-]/g, " ")
+      .replace(/\s+/g, " ");
+
+    const normalizedMode = String(tournament.mode || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[_-]/g, " ")
+      .replace(/\s+/g, " ");
+
+    let dailyLimit: number | null = null;
+    let dailyGameLabel = "";
+
+    if (
+      normalizedGame === "free fire max" ||
+      normalizedGame === "freefire max" ||
+      normalizedGame === "ff max" ||
+      normalizedGame === "ffmax"
+    ) {
+      dailyLimit =
+        currentUser.daily_free_fire_max_limit == null
+          ? null
+          : Number(currentUser.daily_free_fire_max_limit);
+      dailyGameLabel = "Free Fire MAX";
+    } else if (
+      normalizedMode.includes("clash squad") ||
+      normalizedGame.includes("clash squad")
+    ) {
+      dailyLimit =
+        currentUser.daily_clash_squad_limit == null
+          ? null
+          : Number(currentUser.daily_clash_squad_limit);
+      dailyGameLabel = "Clash Squad";
+    } else if (
+      normalizedMode.includes("lone wolf") ||
+      normalizedGame.includes("lone wolf") ||
+      normalizedGame === "lonewolf"
+    ) {
+      dailyLimit =
+        currentUser.daily_lone_wolf_limit == null
+          ? null
+          : Number(currentUser.daily_lone_wolf_limit);
+      dailyGameLabel = "Lone Wolf";
+    } else {
+      dailyLimit =
+        currentUser.daily_free_fire_limit == null
+          ? null
+          : Number(currentUser.daily_free_fire_limit);
+      dailyGameLabel = "Free Fire";
+    }
+
+    if (dailyLimit !== null) {
+      if (!Number.isFinite(dailyLimit) || dailyLimit < 0) {
+        throw new Error("Invalid daily match limit configuration.");
+      }
+
+      // Daily reset is automatic: no cron/job is required.
+      // The counter is calculated from successful, non-cancelled
+      // tournament entries created during today's India calendar day.
+      const now = new Date();
+      const indiaDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(now);
+
+      const dayStart = new Date(`${indiaDate}T00:00:00+05:30`);
+      const dayEnd = new Date(`${indiaDate}T00:00:00+05:30`);
+      dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+
+      const { count: todaySuccessfulJoins, error: dailyCountError } =
+        await supabaseAdmin
+          .from("tournament_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .eq("cancelled", false)
+          .gte("created_at", dayStart.toISOString())
+          .lt("created_at", dayEnd.toISOString());
+
+      if (dailyCountError) throw dailyCountError;
+
+      const usedToday = Number(todaySuccessfulJoins || 0);
+
+      if (usedToday >= dailyLimit) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "DAILY_MATCH_LIMIT_REACHED",
+            error: `Daily ${dailyGameLabel} tournament limit reached. You can join again tomorrow.`,
+            limit: dailyLimit,
+            used: usedToday,
+            remaining: 0,
+          },
+          { status: 429 }
+        );
+      }
     }
 
     const entryFee = Math.max(
@@ -289,6 +671,7 @@ export async function POST(request: Request) {
           free_fire_uid: uid,
           game_name: gameName,
           cancelled: false,
+          created_at: new Date().toISOString(),
         })
         .eq("id", existingEntry.id)
         .eq("tournament_id", tournamentId)
@@ -449,6 +832,14 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    // First successful tournament join referral milestone.
+    // This is intentionally after the entry + wallet transaction succeed.
+    await processFirstTournamentReferralReward(
+      userId,
+      entry.id,
+      tournamentId
+    );
 
     return NextResponse.json({
       success: true,
